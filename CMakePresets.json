@@ -1,0 +1,150 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "serial",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "H5C_ENABLE_PARALLEL": "OFF"
+      }
+    },
+    {
+      "name": "parallel",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "H5C_ENABLE_PARALLEL": "ON"
+      }
+    },
+    {
+      "name": "intel-flags",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_C_FLAGS": "-Wall -Wextra"
+      }
+    },
+    {
+      "name": "gnu-flags",
+      "hidden": true,
+      "cacheVariables": {
+        "CMAKE_C_FLAGS": "-Wall -Wextra"
+      }
+    },
+    {
+      "name": "intel",
+      "inherits": [
+        "serial",
+        "intel-flags"
+      ],
+      "displayName": "Intel LLVM, serial HDF5",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "icx"
+      },
+      "description": "Preferred toolchain. Intel LLVM, serial HDF5."
+    },
+    {
+      "name": "intel-mpi",
+      "inherits": [
+        "parallel",
+        "intel-flags"
+      ],
+      "displayName": "Intel LLVM + Intel MPI, parallel HDF5",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "mpiicx"
+      },
+      "description": "Preferred toolchain for parallel I/O. Intel LLVM + Intel MPI."
+    },
+    {
+      "name": "gnu",
+      "inherits": [
+        "serial",
+        "gnu-flags"
+      ],
+      "displayName": "GNU, serial HDF5",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc"
+      },
+      "description": "Portability baseline. Everything must also build here."
+    },
+    {
+      "name": "gnu-mpi",
+      "inherits": [
+        "parallel",
+        "gnu-flags"
+      ],
+      "displayName": "GNU + MPI, parallel HDF5",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "mpicc"
+      },
+      "description": "Portability baseline for parallel I/O."
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "intel",
+      "configurePreset": "intel"
+    },
+    {
+      "name": "intel-mpi",
+      "configurePreset": "intel-mpi"
+    },
+    {
+      "name": "gnu",
+      "configurePreset": "gnu"
+    },
+    {
+      "name": "gnu-mpi",
+      "configurePreset": "gnu-mpi"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "quick-base",
+      "hidden": true,
+      "filter": {
+        "include": {
+          "label": "quick"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "intel",
+      "inherits": "quick-base",
+      "configurePreset": "intel"
+    },
+    {
+      "name": "intel-mpi",
+      "inherits": "quick-base",
+      "configurePreset": "intel-mpi"
+    },
+    {
+      "name": "gnu",
+      "inherits": "quick-base",
+      "configurePreset": "gnu"
+    },
+    {
+      "name": "gnu-mpi",
+      "inherits": "quick-base",
+      "configurePreset": "gnu-mpi"
+    }
+  ]
+}

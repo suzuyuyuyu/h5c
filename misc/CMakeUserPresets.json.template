@@ -1,0 +1,93 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "my-intel",
+      "inherits": "intel",
+      "displayName": "Intel LLVM, serial HDF5 (this machine)",
+      "description": "Adds the local HDF5 and install paths to the intel preset.",
+      "cacheVariables": {
+        "HDF5_ROOT": "$env{HOME}/.local/opt/intel/hdf5-2.1.0",
+        "CMAKE_INSTALL_PREFIX": "$env{HOME}/.local/opt/intel/h5c-0.1.0"
+      }
+    },
+    {
+      "name": "my-intel-mpi",
+      "inherits": "intel-mpi",
+      "displayName": "Intel LLVM + Intel MPI, parallel HDF5 (this machine)",
+      "description": "Parallel HDF5 goes in its own prefix so the serial install stays usable.",
+      "cacheVariables": {
+        "HDF5_ROOT": "$env{HOME}/.local/opt/intel/phdf5-2.1.0",
+        "CMAKE_INSTALL_PREFIX": "$env{HOME}/.local/opt/intel/h5c-mpi-0.1.0"
+      }
+    },
+    {
+      "name": "my-gnu",
+      "inherits": "gnu",
+      "displayName": "GNU, serial HDF5 (this machine)",
+      "description": "Portability check against the system GCC. Needs a GNU-built HDF5, which is not installed on this machine yet -- adjust HDF5_ROOT or drop this preset.",
+      "cacheVariables": {
+        "HDF5_ROOT": "$env{HOME}/.local/opt/gnu/hdf5-2.1.0",
+        "CMAKE_INSTALL_PREFIX": "$env{HOME}/.local/opt/gnu/h5c-0.1.0"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "my-intel",
+      "configurePreset": "my-intel"
+    },
+    {
+      "name": "my-intel-mpi",
+      "configurePreset": "my-intel-mpi"
+    },
+    {
+      "name": "my-gnu",
+      "configurePreset": "my-gnu"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "my-intel",
+      "configurePreset": "my-intel",
+      "filter": {
+        "include": {
+          "label": "quick"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "my-intel-mpi",
+      "configurePreset": "my-intel-mpi",
+      "displayName": "quick only; the mpi-labelled tests need a job script",
+      "filter": {
+        "include": {
+          "label": "quick"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "my-gnu",
+      "configurePreset": "my-gnu",
+      "filter": {
+        "include": {
+          "label": "quick"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
