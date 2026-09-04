@@ -1,6 +1,5 @@
 /*
- * Visualization HDF5 writer (scheme_version 1). Compiled only with
- * H5C_ENABLE_PARALLEL, like h5c_parallel.c.
+ * Visualization HDF5 writer (scheme_version 1).
  *
  * The file layout, what each rank contributes and the collective discipline
  * are documented in include/h5c/h5c_viz.h. h5fortran's
@@ -41,7 +40,10 @@ struct h5c_viz {
     hid_t        fid;
     h5c_file_t  *wrap;      /* borrowed wrapper over fid, for the attr code */
     h5c_status_t sticky;    /* first non-OK status seen on this writer */
+#ifdef H5C_HAVE_PARALLEL
     MPI_Comm     comm;      /* borrowed from the caller, valid until close */
+#endif
+    int          parallel;
     int          me;
     int          nprocs;
 
@@ -72,24 +74,33 @@ struct h5c_viz {
  * enum is append-only with H5C_OK == 0, so MAX picks a real failure over
  * success. Identical in spirit to agree() in h5c_parallel.c.
  */
-static h5c_status_t agree(MPI_Comm comm, h5c_status_t local)
+static h5c_status_t agree(const h5c_viz_t *viz, h5c_status_t local)
 {
+#ifdef H5C_HAVE_PARALLEL
     int mine, worst;
 
-    mine  = (int)local;
-    worst = mine;
-    if (MPI_Allreduce(&mine, &worst, 1, MPI_INT, MPI_MAX, comm) != MPI_SUCCESS) {
-        return h5c__fail(H5C_ERR_MPI, "MPI_Allreduce failed agreeing on status");
+    if (viz->parallel) {
+        mine  = (int)local;
+        worst = mine;
+        if (MPI_Allreduce(&mine, &worst, 1, MPI_INT, MPI_MAX,
+                          viz->comm) != MPI_SUCCESS) {
+            return h5c__fail(H5C_ERR_MPI,
+                             "MPI_Allreduce failed agreeing on status");
+        }
+        if (worst == (int)H5C_OK) {
+            return H5C_OK;
+        }
+        if (local != H5C_OK) {
+            return local; /* keep this rank's own, more specific message */
+        }
+        return h5c__fail((h5c_status_t)worst,
+                         "another rank reported '%s'; failing collectively",
+                         h5c_status_string((h5c_status_t)worst));
     }
-    if (worst == (int)H5C_OK) {
-        return H5C_OK;
-    }
-    if (local != H5C_OK) {
-        return local; /* keep this rank's own, more specific message */
-    }
-    return h5c__fail((h5c_status_t)worst,
-                     "another rank reported '%s'; failing collectively",
-                     h5c_status_string((h5c_status_t)worst));
+#else
+    (void)viz;
+#endif
+    return local;
 }
 
 /* Folds `status` into the writer's sticky error and returns it unchanged. */
@@ -161,21 +172,32 @@ static char *mesh_path(const h5c_viz_t *viz, const char *sub, const char *leaf)
 /* dataspaces and transfers                                            */
 /* ------------------------------------------------------------------ */
 
-/* Transfer property list. Visualization output is always collective. */
-static hid_t make_dxpl(void)
+/* Parallel transfers are collective; serial transfers use H5P_DEFAULT. */
+static hid_t make_dxpl(const h5c_viz_t *viz)
 {
     hid_t xfer;
+
+#ifdef H5C_HAVE_PARALLEL
+    if (!viz->parallel) {
+        return H5P_DEFAULT;
+    }
+#else
+    (void)viz;
+    return H5P_DEFAULT;
+#endif
 
     xfer = H5Pcreate(H5P_DATASET_XFER);
     if (xfer < 0) {
         h5c__fail_hdf5((long)xfer, "H5Pcreate(H5P_DATASET_XFER) failed");
         return H5I_INVALID_HID;
     }
+#ifdef H5C_HAVE_PARALLEL
     if (H5Pset_dxpl_mpio(xfer, H5FD_MPIO_COLLECTIVE) < 0) {
         H5Pclose(xfer);
         h5c__fail_hdf5(-1, "H5Pset_dxpl_mpio failed");
         return H5I_INVALID_HID;
     }
+#endif
     return xfer;
 }
 
@@ -275,7 +297,8 @@ static h5c_status_t create_dataset(hid_t gid, const char *name,
  * Writes this rank's rows of an already-contiguous buffer in one collective
  * transfer. `buf` may be NULL when `rows == 0`.
  */
-static h5c_status_t write_block(hid_t gid, const char *name, const void *buf,
+static h5c_status_t write_block(const h5c_viz_t *viz, hid_t gid,
+                                const char *name, const void *buf,
                                 h5c_type_t type, size_t rows, size_t offset,
                                 size_t total, int drank, size_t ncols)
 {
@@ -287,7 +310,7 @@ static h5c_status_t write_block(hid_t gid, const char *name, const void *buf,
                              &did, &fsid)) != H5C_OK) {
         return st;
     }
-    xfer = make_dxpl();
+    xfer = make_dxpl(viz);
     if (xfer == H5I_INVALID_HID) {
         H5Dclose(did);
         H5Sclose(fsid);
@@ -300,7 +323,7 @@ static h5c_status_t write_block(hid_t gid, const char *name, const void *buf,
         }
         H5Sclose(msid);
     }
-    H5Pclose(xfer);
+    if (xfer != H5P_DEFAULT) { H5Pclose(xfer); }
     H5Dclose(did);
     H5Sclose(fsid);
     return st;
@@ -397,20 +420,31 @@ static void stage_conn(char *dst, size_t row0, size_t rows, const void *ctx)
  * enter every call, with an empty selection. Same device as agree_tiles() in
  * h5c_parallel.c; the floor of 1 keeps one transfer when no rank owns rows.
  */
-static h5c_status_t agree_tiles(MPI_Comm comm, size_t n, size_t rows,
+static h5c_status_t agree_tiles(const h5c_viz_t *viz, size_t n, size_t rows,
                                 long long *ntiles)
 {
-    long long mine, most;
+    long long mine;
+#ifdef H5C_HAVE_PARALLEL
+    long long most;
+#endif
 
     mine = (rows > 0) ? (long long)((n + rows - 1) / rows) : 0;
-    most = mine;
-    if (MPI_Allreduce(&mine, &most, 1, MPI_LONG_LONG, MPI_MAX,
-                      comm) != MPI_SUCCESS) {
-        *ntiles = 1;
-        return h5c__fail(H5C_ERR_MPI,
-                         "MPI_Allreduce failed agreeing on the tile count");
+#ifdef H5C_HAVE_PARALLEL
+    if (viz->parallel) {
+        most = mine;
+        if (MPI_Allreduce(&mine, &most, 1, MPI_LONG_LONG, MPI_MAX,
+                          viz->comm) != MPI_SUCCESS) {
+            *ntiles = 1;
+            return h5c__fail(H5C_ERR_MPI,
+                             "MPI_Allreduce failed agreeing on the tile count");
+        }
+        *ntiles = (most < 1) ? 1 : most;
+        return H5C_OK;
     }
-    *ntiles = (most < 1) ? 1 : most;
+#else
+    (void)viz;
+#endif
+    *ntiles = (mine < 1) ? 1 : mine;
     return H5C_OK;
 }
 
@@ -422,7 +456,8 @@ static h5c_status_t agree_tiles(MPI_Comm comm, size_t n, size_t rows,
  * The returned status is agreed across the communicator, so all ranks leave
  * with the same verdict.
  */
-static h5c_status_t write_staged(MPI_Comm comm, hid_t gid, const char *name,
+static h5c_status_t write_staged(const h5c_viz_t *viz, hid_t gid,
+                                 const char *name,
                                  h5c_type_t type, size_t rows_local,
                                  size_t offset, size_t total, size_t ncols,
                                  stage_fn stage, const void *ctx)
@@ -450,24 +485,24 @@ static h5c_status_t write_staged(MPI_Comm comm, hid_t gid, const char *name,
                            (unsigned long)(rows * row_bytes), name);
         }
     }
-    if ((st = agree(comm, st)) != H5C_OK) {
+    if ((st = agree(viz, st)) != H5C_OK) {
         free(buf);
         return st;
     }
-    if ((st = agree_tiles(comm, rows_local, rows, &ntiles)) != H5C_OK) {
+    if ((st = agree_tiles(viz, rows_local, rows, &ntiles)) != H5C_OK) {
         free(buf);
         return st;
     }
 
     st = create_dataset(gid, name, type, total, drank, ncols, &did, &fsid);
     if (st == H5C_OK) {
-        xfer = make_dxpl();
+        xfer = make_dxpl(viz);
         if (xfer == H5I_INVALID_HID) {
             st = H5C_ERR_HDF5;
         }
     }
-    if ((st = agree(comm, st)) != H5C_OK) {
-        if (xfer >= 0) { H5Pclose(xfer); }
+    if ((st = agree(viz, st)) != H5C_OK) {
+        if (xfer >= 0 && xfer != H5P_DEFAULT) { H5Pclose(xfer); }
         if (did  >= 0) { H5Dclose(did);  }
         if (fsid >= 0) { H5Sclose(fsid); }
         free(buf);
@@ -504,11 +539,11 @@ static h5c_status_t write_staged(MPI_Comm comm, hid_t gid, const char *name,
         H5Sclose(msid);
     }
 
-    if (xfer >= 0) { H5Pclose(xfer); }
+    if (xfer >= 0 && xfer != H5P_DEFAULT) { H5Pclose(xfer); }
     if (did  >= 0) { H5Dclose(did);  }
     if (fsid >= 0) { H5Sclose(fsid); }
     free(buf);
-    return agree(comm, st);
+    return agree(viz, st);
 }
 
 /* ------------------------------------------------------------------ */
@@ -530,8 +565,11 @@ const char *h5c_viz_attribute_type(size_t ncomp)
 /* lifecycle                                                           */
 /* ------------------------------------------------------------------ */
 
-h5c_status_t h5c_viz_open(const char *path, double time,
-                          MPI_Comm comm, MPI_Info info, h5c_viz_t **out)
+static h5c_status_t viz_open_impl(const char *path, double time, int parallel,
+#ifdef H5C_HAVE_PARALLEL
+                                  MPI_Comm comm, MPI_Info info,
+#endif
+                                  h5c_viz_t **out)
 {
     h5c_status_t st;
     h5c_viz_t   *viz;
@@ -545,33 +583,44 @@ h5c_status_t h5c_viz_open(const char *path, double time,
     if (path == NULL || path[0] == '\0') {
         return h5c__fail(H5C_ERR_INVALID_ARG, "h5c_viz_open: empty path");
     }
-    if (comm == MPI_COMM_NULL) {
-        return h5c__fail(H5C_ERR_INVALID_ARG, "h5c_viz_open: MPI_COMM_NULL");
+#ifdef H5C_HAVE_PARALLEL
+    if (parallel && comm == MPI_COMM_NULL) {
+        return h5c__fail(H5C_ERR_INVALID_ARG, "h5c_viz_popen: MPI_COMM_NULL");
     }
+#else
+    (void)parallel;
+#endif
     if ((st = h5c__ensure_init()) != H5C_OK) {
         return st;
     }
 
-    fapl = H5Pcreate(H5P_FILE_ACCESS);
-    if (fapl < 0) {
-        return h5c__fail_hdf5((long)fapl, "H5Pcreate(H5P_FILE_ACCESS) failed");
+    fapl = H5P_DEFAULT;
+#ifdef H5C_HAVE_PARALLEL
+    if (parallel) {
+        fapl = H5Pcreate(H5P_FILE_ACCESS);
+        if (fapl < 0) {
+            return h5c__fail_hdf5((long)fapl,
+                                  "H5Pcreate(H5P_FILE_ACCESS) failed");
+        }
+        /*
+         * DELIBERATE, and copied from h5fortran: no collective metadata
+         * properties. Every rank writes every attribute symmetrically instead,
+         * which is what keeps the metadata consistent; mixing rank-0-only
+         * attribute writes with collective metadata operations corrupts the
+         * metadata checksums.
+         */
+        if (H5Pset_fapl_mpio(fapl, comm, info) < 0) {
+            H5Pclose(fapl);
+            return h5c__fail_hdf5(-1, "H5Pset_fapl_mpio failed for '%s'", path);
+        }
     }
-    /*
-     * DELIBERATE, and copied from h5fortran: no collective metadata
-     * properties. Every rank writes every attribute symmetrically instead,
-     * which is what keeps the metadata consistent; mixing rank-0-only
-     * attribute writes with collective metadata operations corrupts the
-     * metadata checksums.
-     */
-    if (H5Pset_fapl_mpio(fapl, comm, info) < 0) {
-        H5Pclose(fapl);
-        return h5c__fail_hdf5(-1, "H5Pset_fapl_mpio failed for '%s'", path);
-    }
+#endif
     fid = H5Fcreate(path, H5F_ACC_TRUNC, H5P_DEFAULT, fapl);
-    H5Pclose(fapl);
+    if (fapl != H5P_DEFAULT) {
+        H5Pclose(fapl);
+    }
     if (fid < 0) {
-        return h5c__fail_hdf5((long)fid, "cannot create '%s' in parallel",
-                              path);
+        return h5c__fail_hdf5((long)fid, "cannot create '%s'", path);
     }
 
     viz = (h5c_viz_t *)calloc(1, sizeof *viz);
@@ -581,7 +630,10 @@ h5c_status_t h5c_viz_open(const char *path, double time,
     }
     viz->fid       = fid;
     viz->sticky    = H5C_OK;
+    viz->parallel  = parallel;
+#ifdef H5C_HAVE_PARALLEL
     viz->comm      = comm;   /* borrowed; valid until h5c_viz_close() */
+#endif
     viz->gid_mesh  = H5I_INVALID_HID;
     viz->gid_geom  = H5I_INVALID_HID;
     viz->gid_pdata = H5I_INVALID_HID;
@@ -593,12 +645,20 @@ h5c_status_t h5c_viz_open(const char *path, double time,
         free(viz);
         return st;
     }
-    if (MPI_Comm_rank(comm, &viz->me) != MPI_SUCCESS ||
-        MPI_Comm_size(comm, &viz->nprocs) != MPI_SUCCESS) {
-        h5c_close(viz->wrap);
-        H5Fclose(fid);
-        free(viz);
-        return h5c__fail(H5C_ERR_MPI, "MPI_Comm_rank/size failed");
+#ifdef H5C_HAVE_PARALLEL
+    if (parallel) {
+        if (MPI_Comm_rank(comm, &viz->me) != MPI_SUCCESS ||
+            MPI_Comm_size(comm, &viz->nprocs) != MPI_SUCCESS) {
+            h5c_close(viz->wrap);
+            H5Fclose(fid);
+            free(viz);
+            return h5c__fail(H5C_ERR_MPI, "MPI_Comm_rank/size failed");
+        }
+    } else
+#endif
+    {
+        viz->me = 0;
+        viz->nprocs = 1;
     }
 
     /* Root metadata, written by every rank so that all ranks agree. */
@@ -607,7 +667,7 @@ h5c_status_t h5c_viz_open(const char *path, double time,
     if (st == H5C_OK) {
         st = h5c_write_attr_scalar(viz->wrap, "/", "time", &time, H5C_F64);
     }
-    if ((st = agree(comm, st)) != H5C_OK) {
+    if ((st = agree(viz, st)) != H5C_OK) {
         h5c_close(viz->wrap);
         H5Fclose(fid);
         free(viz);
@@ -617,6 +677,23 @@ h5c_status_t h5c_viz_open(const char *path, double time,
     *out = viz;
     return H5C_OK;
 }
+
+h5c_status_t h5c_viz_open(const char *path, double time, h5c_viz_t **out)
+{
+#ifdef H5C_HAVE_PARALLEL
+    return viz_open_impl(path, time, 0, MPI_COMM_NULL, MPI_INFO_NULL, out);
+#else
+    return viz_open_impl(path, time, 0, out);
+#endif
+}
+
+#ifdef H5C_HAVE_PARALLEL
+h5c_status_t h5c_viz_popen(const char *path, double time, MPI_Comm comm,
+                           MPI_Info info, h5c_viz_t **out)
+{
+    return viz_open_impl(path, time, 1, comm, info, out);
+}
+#endif
 
 /* Releases the current mesh's group ids. Leaves no dangling id behind. */
 static void close_mesh(h5c_viz_t *viz)
@@ -709,7 +786,16 @@ static h5c_status_t open_or_create_group(hid_t loc, const char *name,
  */
 static h5c_status_t gather_counts(h5c_viz_t *viz, size_t np, size_t nc)
 {
+#ifdef H5C_HAVE_PARALLEL
     int64_t mine[2], before[2], total[2];
+
+    if (!viz->parallel) {
+        viz->point_offset = 0;
+        viz->cell_offset  = 0;
+        viz->total_points = np;
+        viz->total_cells  = nc;
+        return H5C_OK;
+    }
 
     mine[0]   = (int64_t)np;
     mine[1]   = (int64_t)nc;
@@ -732,6 +818,12 @@ static h5c_status_t gather_counts(h5c_viz_t *viz, size_t np, size_t nc)
     viz->cell_offset  = (size_t)before[1];
     viz->total_points = (size_t)total[0];
     viz->total_cells  = (size_t)total[1];
+#else
+    viz->point_offset = 0;
+    viz->cell_offset  = 0;
+    viz->total_points = np;
+    viz->total_cells  = nc;
+#endif
     return H5C_OK;
 }
 
@@ -802,7 +894,7 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
         st = h5c__fail(H5C_ERR_INVALID_ARG, "unknown mesh kind %d",
                        (int)(mesh == NULL ? 0 : mesh->kind));
     }
-    if ((st = agree(viz->comm, st)) != H5C_OK) {
+    if ((st = agree(viz, st)) != H5C_OK) {
         return record(viz, st);
     }
 
@@ -817,7 +909,7 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
         memcpy(viz->name, name, strlen(name) + 1);
     }
     /* Agreed before gather_counts(), which every rank must enter together. */
-    if ((st = agree(viz->comm, st)) != H5C_OK) {
+    if ((st = agree(viz, st)) != H5C_OK) {
         close_mesh(viz);
         return record(viz, st);
     }
@@ -869,7 +961,7 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
             free(path);
         }
     }
-    if ((st = agree(viz->comm, st)) != H5C_OK) {
+    if ((st = agree(viz, st)) != H5C_OK) {
         close_mesh(viz);
         return record(viz, st);
     }
@@ -941,13 +1033,13 @@ h5c_status_t h5c_viz_write_nodes(h5c_viz_t *viz, const void *nodes,
                        "nodes is NULL but this rank owns %lu points",
                        (unsigned long)viz->num_points);
     }
-    if ((st = agree(viz->comm, st)) != H5C_OK) {
+    if ((st = agree(viz, st)) != H5C_OK) {
         return record(viz, st);
     }
 
-    st = write_block(viz->gid_geom, NODES_NAME, nodes, type, viz->num_points,
+    st = write_block(viz, viz->gid_geom, NODES_NAME, nodes, type, viz->num_points,
                      viz->point_offset, viz->total_points, 2, NODE_COMPS);
-    return record(viz, agree(viz->comm, st));
+    return record(viz, agree(viz, st));
 }
 
 h5c_status_t h5c_viz_write_nodes_comps(h5c_viz_t *viz,
@@ -974,14 +1066,14 @@ h5c_status_t h5c_viz_write_nodes_comps(h5c_viz_t *viz,
             }
         }
     }
-    if ((st = agree(viz->comm, st)) != H5C_OK) {
+    if ((st = agree(viz, st)) != H5C_OK) {
         return record(viz, st);
     }
 
     ctx.comps = xyz;
     ctx.ncomp = NODE_COMPS;
     ctx.esize = h5c_type_size(type);
-    st = write_staged(viz->comm, viz->gid_geom, NODES_NAME, type,
+    st = write_staged(viz, viz->gid_geom, NODES_NAME, type,
                       viz->num_points, viz->point_offset, viz->total_points,
                       NODE_COMPS, stage_comps, &ctx);
     return record(viz, st);
@@ -1052,7 +1144,7 @@ h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
         }
     }
     /* Agreed BEFORE the first collective HDF5 call, so nobody deadlocks. */
-    if ((st = agree(viz->comm, st)) != H5C_OK) {
+    if ((st = agree(viz, st)) != H5C_OK) {
         return record(viz, st);
     }
 
@@ -1060,7 +1152,7 @@ h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
     ctx.npe    = (size_t)viz->npe;
     ctx.offset = viz->point_offset;
     ctx.type   = type;
-    st = write_staged(viz->comm, viz->gid_geom, CONN_NAME, type,
+    st = write_staged(viz, viz->gid_geom, CONN_NAME, type,
                       viz->num_cells, viz->cell_offset, viz->total_cells,
                       (size_t)viz->npe, stage_conn, &ctx);
     return record(viz, st);
@@ -1152,7 +1244,7 @@ static h5c_status_t write_field(h5c_viz_t *viz, int cell_data,
             }
         }
     }
-    if ((st = agree(viz->comm, st)) != H5C_OK) {
+    if ((st = agree(viz, st)) != H5C_OK) {
         return record(viz, st);
     }
 
@@ -1160,11 +1252,11 @@ static h5c_status_t write_field(h5c_viz_t *viz, int cell_data,
         ctx.comps = comps;
         ctx.ncomp = ncomp;
         ctx.esize = h5c_type_size(type);
-        st = write_staged(viz->comm, gid, name, type, rows, offset, total,
+        st = write_staged(viz, gid, name, type, rows, offset, total,
                           ncomp, stage_comps, &ctx);
     } else {
-        st = agree(viz->comm,
-                   write_block(gid, name, buf, type, rows, offset, total,
+        st = agree(viz,
+                   write_block(viz, gid, name, buf, type, rows, offset, total,
                                (ncomp > 1) ? 2 : 1, ncomp));
     }
     if (st != H5C_OK) {
@@ -1172,7 +1264,7 @@ static h5c_status_t write_field(h5c_viz_t *viz, int cell_data,
     }
 
     /* Every rank writes the attribute, as for the root metadata. */
-    return record(viz, agree(viz->comm,
+    return record(viz, agree(viz,
                              write_field_attr(viz, group, name, ncomp)));
 }
 

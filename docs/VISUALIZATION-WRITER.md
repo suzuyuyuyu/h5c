@@ -22,7 +22,7 @@ XDMF/XML生成は実装せず、独立ツール`h5xdmf`に任せる。
 - meshごとにgeometry、任意のconnectivity、point/cell dataを出力する。
 - `topology_type`、`nodes_per_element`、`attribute_type`をscheme 1どおり付与する。
 - Vector/Tensorは既存の`h5c_write_interleaved()`を再利用し、`[n, ncomp]`で保存する。
-- `ncomp`は1、3、6、9。Tensor6は`XX, XY, XZ, YY, YZ, ZZ`順とする。
+- `ncomp`は1、3、6、9。Tensor6はParaViewに合わせて`XX, YY, ZZ, XY, YZ, XZ`順とする。
 - Parallelではrank-local connectivityを0-originで受け取り、global node offsetを加える。
 - connectivity範囲外、属性不整合、rank間で一致すべきmetadataの不一致は書き込み前に失敗させる。
 - h5cpp向けの重複実装は作らず、h5cppからラップできる小さなC APIにする。

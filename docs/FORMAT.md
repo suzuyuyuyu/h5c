@@ -180,8 +180,9 @@ HDF5 Fortran ライブラリの次元反転により、ファイル上は同じ 
 
 ### テンソル成分の順序
 
-`ncomp = 6`（対称 3×3）の成分順は **XDMF3 の規約に従い `XX, XY, XZ, YY, YZ, ZZ`**
-とする。これに一致していなければテンソル不変量の計算が壊れる。
+`ncomp = 6`（対称3×3）の成分順は、ParaViewの対称テンソル規約に従い
+**`XX, YY, ZZ, XY, YZ, XZ`**とする。これに一致していなければ
+テンソル不変量の計算が壊れる。
 
 この順序は `h5fortran` にも `h5xdmf` にも文書化されていない
 （`model.py` は成分数から型を推定するだけ）。
@@ -190,6 +191,10 @@ HDF5 Fortran ライブラリの次元反転により、ファイル上は同じ 
 
 `h5c_viz.h` が書く形式。`h5fortran` の `t_phdf5_writer` と同一であり、
 Python の `h5xdmf` がどちらの出力からも XDMF3 を生成する。
+
+この形式は serial / parallel のどちらでも書ける。serial では 1 プロセスの
+ローカル数がそのまま total になり、offset は常に 0 である。parallel では
+各 rank のデータを連結するが、ファイル上のレイアウトは同じである。
 
 ```text
 /                              attrs: scheme_version=1 (i32), time (f64)
@@ -206,7 +211,7 @@ field には `attribute_type` 属性が付く（`h5fortran` の出力と一致�
 |---|---|
 | 1 | `Scalar`（dataset は 1 次元） |
 | 3 | `Vector` |
-| 6 | `Tensor6`（成分順 `XX, XY, XZ, YY, YZ, ZZ`） |
+| 6 | `Tensor6`（成分順 `XX, YY, ZZ, XY, YZ, XZ`） |
 | 9 | `Tensor` |
 | その他 | なし（XDMF に名前がないため） |
 

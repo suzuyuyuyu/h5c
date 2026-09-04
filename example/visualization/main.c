@@ -9,13 +9,15 @@
  * The point of this example is that the files h5c writes are the SAME layout
  * h5fortran writes, so the same Python tooling reads either.
  *
- * MUST be run through the batch system, never on a login node:
+ * In a parallel build, run this example through the batch system:
  *     sbatch example/visualization/run.sh
  */
 #include <h5c/h5c_viz.h>
 
 #include <math.h>
+#ifdef H5C_HAVE_PARALLEL
 #include <mpi.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,7 +28,7 @@
 
 static int g_me = 0, g_nprocs = 1;
 
-/* Fails loudly and identically on every rank: these calls are collective. */
+/* Fails loudly; in parallel builds the error path aborts all ranks. */
 static void must(h5c_status_t st, const char *what)
 {
     if (st != H5C_OK) {
@@ -34,7 +36,11 @@ static void must(h5c_status_t st, const char *what)
             fprintf(stderr, "%s: %s (%s)\n", what, h5c_status_string(st),
                     h5c_last_error()->message);
         }
+#ifdef H5C_HAVE_PARALLEL
         MPI_Abort(MPI_COMM_WORLD, 1);
+#else
+        exit(EXIT_FAILURE);
+#endif
     }
 }
 
@@ -99,8 +105,12 @@ static void write_step(int step, double t)
     /* Zero-padded so lexical order is time order. */
     snprintf(path, sizeof path, "result/seq%06d.h5", step);
 
-    must(h5c_viz_open(path, t, MPI_COMM_WORLD, MPI_INFO_NULL, &viz),
-         "viz_open");
+#ifdef H5C_HAVE_PARALLEL
+    must(h5c_viz_popen(path, t, MPI_COMM_WORLD, MPI_INFO_NULL, &viz),
+         "viz_popen");
+#else
+    must(h5c_viz_open(path, t, &viz), "viz_open");
+#endif
 
     /* ---- the tetrahedral grid ------------------------------------- */
     {
@@ -175,9 +185,11 @@ int main(int argc, char **argv)
 {
     int step;
 
+#ifdef H5C_HAVE_PARALLEL
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &g_me);
     MPI_Comm_size(MPI_COMM_WORLD, &g_nprocs);
+#endif
 
     for (step = 0; step < NSTEPS; step++) {
         write_step(step, 0.25 * (double)step);
@@ -192,6 +204,8 @@ int main(int argc, char **argv)
                "then open result/fluid.xdmf and result/particles.xdmf"
                " in ParaView.\n", NSTEPS, g_nprocs);
     }
+#ifdef H5C_HAVE_PARALLEL
     MPI_Finalize();
+#endif
     return 0;
 }

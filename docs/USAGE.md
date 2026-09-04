@@ -208,8 +208,8 @@ h5c_read_interleaved_f64(f, "/fields/velocity", out, 3, npoints);
 velocity magnitude の色付けやテンソル不変量の計算が使えます。
 
 `ncomp` は 1 / 3 / 6 / 9 が `Scalar` / `Vector` / `Tensor6` / `Tensor` に対応します。
-`ncomp = 6`（対称 3×3）の成分順は XDMF3 の規約に従い
-**`XX, XY, XZ, YY, YZ, ZZ`** です。
+`ncomp = 6`（対称3×3）の成分順はParaViewの対称テンソル規約に従い
+**`XX, YY, ZZ, XY, YZ, XZ`**です。
 
 1 成分だけ欲しいときは、他の成分を一切読みません。
 
@@ -362,7 +362,8 @@ Python の `h5xdmf` が後段で XDMF3 を作ります。形式は `h5fortran` �
 h5c_viz_t *viz = NULL;
 h5c_viz_mesh_t mesh = {0};      /* 0 と NULL は既定値になる */
 
-h5c_viz_open("result/seq000000.h5", t, MPI_COMM_WORLD, MPI_INFO_NULL, &viz);
+/* serial: MPI なし */
+h5c_viz_open("result/seq000000.h5", t, &viz);
 
 mesh.kind              = H5C_VIZ_UNSTRUCTURED;
 mesh.name              = "fluid";
@@ -381,6 +382,16 @@ h5c_viz_write_cell_data(viz, "SubdomainID", id, H5C_I32, 1);
 h5c_viz_close(viz);
 ```
 
+parallel で collective に書く場合は `h5c/h5c_mpi.h` を include し、
+`h5c_viz_popen()` に communicator と MPI-IO hint を渡します。
+
+```c
+#include <h5c/h5c_mpi.h>
+#include <h5c/h5c_viz.h>
+
+h5c_viz_popen("result/seq000000.h5", t, MPI_COMM_WORLD, MPI_INFO_NULL, &viz);
+```
+
 座標を x/y/z で別々に持っているなら `h5c_viz_write_nodes_comps()`、field も
 `_comps` 版があります。ソルバー側で詰め替える必要はありません。
 
@@ -392,8 +403,9 @@ node offset を加えて global ID にするので、node 番号を揃えるた�
 点群は `H5C_VIZ_POLYDATA`、`num_cells = 0` で、connectivity を書きません。
 同じファイルに別の `name` で `begin_mesh` を呼べば複数 mesh を置けます。
 
-**すべての呼び出しは collective** です。点数・cell 数はランクごとに違ってよく、
-0 でも構いません。
+serial の呼び出しは通常のローカルな呼び出しです。parallel の場合だけ、
+すべての呼び出しが collective です。parallel では点数・cell 数はランクごとに
+違ってよく、0 でも構いません。
 
 XDMF の生成は別プロジェクトの `h5xdmf` です。
 

@@ -716,14 +716,14 @@ static void write_with_h5c(void)
     const double v[4] = {  10,  20,  30,  40 };
     const double w[4] = { 100, 200, 300, 400 };
     const double *vec[3] = { u, v, w };
-    /* Tensor6: six distinct components, XX XY XZ YY YZ ZZ. */
+    /* Tensor6: six distinct components, XX YY ZZ XY YZ XZ. */
     const double t_xx[2] = { 1, 2 };
-    const double t_xy[2] = { 3, 4 };
-    const double t_xz[2] = { 5, 6 };
-    const double t_yy[2] = { 7, 8 };
+    const double t_yy[2] = { 3, 4 };
+    const double t_zz[2] = { 5, 6 };
+    const double t_xy[2] = { 7, 8 };
     const double t_yz[2] = { 9, 10 };
-    const double t_zz[2] = { 11, 12 };
-    const double *ten[6] = { t_xx, t_xy, t_xz, t_yy, t_yz, t_zz };
+    const double t_xz[2] = { 11, 12 };
+    const double *ten[6] = { t_xx, t_yy, t_zz, t_xy, t_yz, t_xz };
     const size_t  empty_dims[2] = { 0, 3 };
     const double  attr_f64[5] = { -1.25, 8.5, 3.125, -17.0, 42.75 };
 
@@ -1014,7 +1014,7 @@ static void inspect_h5c_file(void)
         ref_check_bytes(fid, "/fields/velocity_manual", want, sizeof want);
     }
     {
-        /* XDMF3 Tensor6 order XX XY XZ YY YZ ZZ, all six values distinct. */
+        /* ParaView Tensor6 order XX YY ZZ XY YZ XZ, all values distinct. */
         const hsize_t tdims[2] = { 2, 6 };
         const double  want[12] = {
             1, 3, 5, 7,  9, 11,

@@ -92,6 +92,51 @@ static void check_partition(h5c_file_t *f, const char *path, size_t nlocal)
 
 /* ------------------------------------------------------------------ */
 
+static void test_plain_rows(h5c_file_t *f)
+{
+    const size_t total = 5u * (size_t)g_nprocs;
+    const size_t begin = total * (size_t)g_me / (size_t)g_nprocs;
+    const size_t end = total * (size_t)(g_me + 1) / (size_t)g_nprocs;
+    const size_t dims[2] = {end - begin, 3};
+    double *got = (double *)malloc(dims[0] * dims[1] * sizeof *got);
+    size_t row, component;
+
+    H5C_CHECK(h5c_pread_rows(f, "/plain", got, H5C_F64, 2, dims, begin));
+    for (row = 0; row < dims[0]; row++) {
+        for (component = 0; component < dims[1]; component++) {
+            const double want = 10.0 * (double)(begin + row) + (double)component;
+            H5C_ASSERT(got[3 * row + component] == want,
+                       "plain row %lu component %lu: got %g want %g",
+                       (unsigned long)(begin + row), (unsigned long)component,
+                       got[3 * row + component], want);
+        }
+    }
+    free(got);
+}
+
+static void create_plain_input(void)
+{
+    if (g_me == 0) {
+        const size_t dims[2] = {5u * (size_t)g_nprocs, 3};
+        const size_t count = dims[0] * dims[1];
+        h5c_file_t *f = NULL;
+        double *data = (double *)malloc(count * sizeof *data);
+        size_t row, component;
+
+        for (row = 0; row < dims[0]; row++)
+            for (component = 0; component < dims[1]; component++)
+                data[3 * row + component] = 10.0 * (double)row + (double)component;
+        H5C_CHECK(h5c_open(PATH, H5C_TRUNCATE, &f));
+        if (f != NULL) {
+            H5C_CHECK(h5c_write(f, "/plain", data, H5C_F64, 2, dims,
+                                H5C_WRITE_DEFAULT));
+            H5C_CHECK(h5c_close(f));
+        }
+        free(data);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 static void test_1d(h5c_file_t *f)
 {
     const size_t nlocal = local_rows(4);   /* 4, 5, 6, ... per rank */
@@ -851,9 +896,11 @@ int main(int argc, char **argv)
     alarm(WATCHDOG_SECONDS);
 
     H5C_CHECK(h5c_init());
-    H5C_CHECK(h5c_popen(PATH, H5C_TRUNCATE, &f));
+    create_plain_input();
+    H5C_CHECK(h5c_popen(PATH, H5C_READWRITE, &f));
 
     if (f != NULL) {
+        test_plain_rows(f);
         test_modes(f);
         test_1d(f);
         test_2d(f);

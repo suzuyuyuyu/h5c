@@ -52,9 +52,10 @@ set(h5c_sources
     src/h5c_string.c
     src/h5c_attribute.c
     src/h5c_interleaved.c
+    src/h5c_viz.c
 )
 if(H5C_ENABLE_PARALLEL)
-    list(APPEND h5c_sources src/h5c_parallel.c src/h5c_viz.c)
+    list(APPEND h5c_sources src/h5c_parallel.c)
 endif()
 
 add_library(h5c ${h5c_sources})

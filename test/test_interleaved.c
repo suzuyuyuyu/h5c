@@ -128,18 +128,18 @@ static void test_read_component(h5c_file_t *f)
     h5c_file_clear_status(f);
 }
 
-/* ncomp = 6: XDMF Tensor6 order XX, XY, XZ, YY, YZ, ZZ, all values distinct. */
+/* ncomp = 6: ParaView order XX, YY, ZZ, XY, YZ, XZ, all values distinct. */
 #define N6 3
 #define NCOMP6 6
 
 static void test_tensor6(h5c_file_t *f)
 {
     static const double xx[N6] = { 1, 2, 3 };
-    static const double xy[N6] = { 11, 12, 13 };
-    static const double xz[N6] = { 21, 22, 23 };
-    static const double yy[N6] = { 31, 32, 33 };
+    static const double yy[N6] = { 11, 12, 13 };
+    static const double zz[N6] = { 21, 22, 23 };
+    static const double xy[N6] = { 31, 32, 33 };
     static const double yz[N6] = { 41, 42, 43 };
-    static const double zz[N6] = { 51, 52, 53 };
+    static const double xz[N6] = { 51, 52, 53 };
     static const double expect[N6 * NCOMP6] = {
         1, 11, 21, 31, 41, 51,
         2, 12, 22, 32, 42, 52,
@@ -153,10 +153,10 @@ static void test_tensor6(h5c_file_t *f)
     size_t c;
     int i;
 
-    comps[0] = xx; comps[1] = xy; comps[2] = xz;
-    comps[3] = yy; comps[4] = yz; comps[5] = zz;
-    want[0] = xx; want[1] = xy; want[2] = xz;
-    want[3] = yy; want[4] = yz; want[5] = zz;
+    comps[0] = xx; comps[1] = yy; comps[2] = zz;
+    comps[3] = xy; comps[4] = yz; comps[5] = xz;
+    want[0] = xx; want[1] = yy; want[2] = zz;
+    want[3] = xy; want[4] = yz; want[5] = xz;
 
     H5C_CHECK(h5c_write_interleaved(f, "/fields/stress", comps, NCOMP6, N6,
                                     H5C_F64, H5C_WRITE_DEFAULT));

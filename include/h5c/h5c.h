@@ -341,7 +341,7 @@ h5c_status_t h5c_attr_length(h5c_file_t *file, const char *obj_path,
  * take an array of `ncomp` component pointers and handle the interleaving.
  *
  * ncomp is 1, 3, 6 or 9 for Scalar, Vector, Tensor6 and Tensor respectively.
- * For ncomp == 6 the XDMF component order is XX, XY, XZ, YY, YZ, ZZ.
+ * For ncomp == 6 the ParaView symmetric tensor order is XX, YY, ZZ, XY, YZ, XZ.
  *
  * WRITING PACKS, READING STRIDES. Writing gathers the components into a
  * contiguous staging buffer and issues one write, because a strided

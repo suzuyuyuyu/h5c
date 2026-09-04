@@ -7,6 +7,12 @@
 
 ### 追加
 
+**可視化 writer の serial 対応（breaking change）**
+
+- `h5c_viz_open(path, time, &out)` を MPI なしで利用できるようにした。
+- 旧来の parallel 用シグネチャは `h5c_viz_popen(path, time, comm, info, &out)`
+  に変更した。既存の呼び出し側はこの名前へ移行する必要がある。
+
 **可視化 writer（`h5c_viz.h`、scheme_version = 1）**
 
 - `h5fortran` の `t_phdf5_writer` と同一レイアウトの HDF5 時系列を書く。
@@ -65,6 +71,11 @@
 ### 修正
 
 実装と検証の過程で見つかった、いずれも h5fortran との相互運用に関わるもの。
+
+- Tensor6の成分順序をParaViewの対称テンソル規約
+  `XX, YY, ZZ, XY, YZ, XZ`へ統一した。
+- parallel buildでは`MPI_Init`を呼ぶ`test_viz`を`mpi`ラベルへ移し、
+  ログインノード向け`quick`テストから除外した。
 
 - **`h5c_read_bool()` が `h5fortran` の `logical`（int32 の 0/1）を読めなかった。**
   HDF5 は enum → integer の変換は行うが **integer → enum の変換経路を持たない**。
@@ -127,3 +138,6 @@ h5c が同じバイト列を生成する）。
   および h5cpp が h5fortran の書いた配列属性を読めること）。
 - 用途は mesh を注釈する短いベクトル（領域の境界、原点、格子間隔）。
   HDF5 は属性を object header に置くため、大きなデータは dataset にする。
+# 2026-09-05
+
+- 通常datasetを保存時のrank分割に依存せず読み込む`h5c_pread_rows`を追加。

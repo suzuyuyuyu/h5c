@@ -41,14 +41,18 @@
  * Collective discipline
  * ---------------------------------------------------------------------------
  *
- * Every function here is collective over the file's communicator: all ranks
- * must call it, in the same order, with the same mesh and field names. Point
- * and cell counts may differ per rank and may be 0.
+ * In serial mode, calls are local. In parallel mode, every function here is
+ * collective over the file's communicator: all ranks must call it, in the
+ * same order, with the same mesh and field names. Point and cell counts may
+ * differ per rank and may be 0.
  */
 #ifndef H5C_VIZ_H
 #define H5C_VIZ_H
 
-#include "h5c/h5c_mpi.h"
+#include "h5c/h5c.h"
+#ifdef H5C_HAVE_PARALLEL
+#  include "h5c/h5c_mpi.h"
+#endif
 #include "h5c/h5c_version.h"
 
 #ifdef __cplusplus
@@ -100,10 +104,16 @@ typedef struct h5c_viz_mesh {
  * scheme_version = H5C_SCHEME_VERSION and time = `time`.
  *
  * One file per time step is the intended usage; `time` is what places it in
- * the series. `comm` may be MPI_COMM_WORLD and `info` may be MPI_INFO_NULL.
+ * the series.
  */
 h5c_status_t h5c_viz_open(const char *path, double time,
-                          MPI_Comm comm, MPI_Info info, h5c_viz_t **out);
+                          h5c_viz_t **out);
+
+#ifdef H5C_HAVE_PARALLEL
+/* Parallel, collective over `comm`. */
+h5c_status_t h5c_viz_popen(const char *path, double time,
+                           MPI_Comm comm, MPI_Info info, h5c_viz_t **out);
+#endif
 
 /*
  * Closes the file and frees the handle, which is invalid afterwards either
@@ -179,7 +189,7 @@ h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
  * are accepted as (n, ncomp) but carry no attribute_type, since XDMF has no
  * name for them.
  *
- * For ncomp == 6 the XDMF component order is XX, XY, XZ, YY, YZ, ZZ.
+ * For ncomp == 6 the ParaView symmetric tensor order is XX, YY, ZZ, XY, YZ, XZ.
  *
  * The _comps forms take ncomp separate arrays and interleave them, which is
  * the usual shape of solver data; the plain forms take one buffer already

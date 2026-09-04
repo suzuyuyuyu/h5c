@@ -33,6 +33,8 @@ endfunction()
 
 h5c_add_example(example_serial      serial/main.c)
 h5c_add_example(example_serial_interleaved interleaved/main.c)
+h5c_add_example(example_serial_visualization visualization/main.c)
+target_link_libraries(example_serial_visualization PRIVATE m)
 
 # The parallel example needs an h5c built with H5C_ENABLE_PARALLEL=ON, which
 # puts H5C_HAVE_PARALLEL on the target. Checking the target rather than a path

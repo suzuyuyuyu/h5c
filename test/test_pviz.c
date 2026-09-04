@@ -34,6 +34,8 @@ H5C_TEST_MAIN_STATE;
 
 #define PATH "test_pviz.h5"
 #define TIME_VALUE 3.75
+#define EQUIV_SERIAL_PATH "test_pviz_serial.h5"
+#define EQUIV_SELF_PATH   "test_pviz_self.h5"
 
 /* Wall-clock budget for the whole program; a stall becomes a failed test. */
 #define WATCHDOG_SECONDS 120
@@ -1060,6 +1062,104 @@ static void check_root(h5c_file_t *f)
                (double)TIME_VALUE);
 }
 
+static void write_equivalence_fixture(h5c_viz_t *viz)
+{
+    static const double nodes[9] = {
+        0.1, 10.2, 100.3, 1.1, 11.2, 101.3, 2.1, 12.2, 102.3
+    };
+    static const int32_t conn[3] = { 0, 1, 2 };
+    static const double pressure[3] = { 1.25, 2.25, 3.25 };
+    static const float velocity[3][3] = {
+        { 100.5f, 101.5f, 102.5f },
+        { 200.5f, 201.5f, 202.5f },
+        { 300.5f, 301.5f, 302.5f }
+    };
+    static const void *comps[3] = { velocity[0], velocity[1], velocity[2] };
+    h5c_viz_mesh_t mesh = {0};
+
+    mesh.kind = H5C_VIZ_UNSTRUCTURED;
+    mesh.name = "equivalence";
+    mesh.topology = "Triangle";
+    mesh.nodes_per_element = 3;
+    mesh.num_points = 3;
+    mesh.num_cells = 1;
+    H5C_CHECK(h5c_viz_begin_mesh(viz, &mesh));
+    H5C_CHECK(h5c_viz_write_nodes(viz, nodes, H5C_F64));
+    H5C_CHECK(h5c_viz_write_connectivity(viz, conn, H5C_I32));
+    H5C_CHECK(h5c_viz_write_point_data(viz, "Pressure", pressure,
+                                       H5C_F64, 1));
+    H5C_CHECK(h5c_viz_write_point_data_comps(viz, "Velocity", comps,
+                                             H5C_F32, 3));
+}
+
+static void write_equivalence_file(const char *path, int parallel)
+{
+    h5c_viz_t *viz = NULL;
+    h5c_status_t st;
+
+    if (parallel) {
+        st = h5c_viz_popen(path, TIME_VALUE, MPI_COMM_SELF, MPI_INFO_NULL,
+                           &viz);
+    } else {
+        st = h5c_viz_open(path, TIME_VALUE, &viz);
+    }
+    H5C_CHECK(st);
+    if (viz == NULL) {
+        return;
+    }
+    write_equivalence_fixture(viz);
+    H5C_CHECK(h5c_viz_status(viz));
+    H5C_CHECK(h5c_viz_close(viz));
+}
+
+static void compare_equivalence_files(void)
+{
+    static const char *const paths[] = {
+        "/equivalence/geometry/nodes",
+        "/equivalence/geometry/connectivity",
+        "/equivalence/point_data/Pressure",
+        "/equivalence/point_data/Velocity"
+    };
+    h5c_file_t *serial = NULL, *self = NULL;
+    size_t i;
+
+    H5C_CHECK(h5c_open(EQUIV_SERIAL_PATH, H5C_READ, &serial));
+    H5C_CHECK(h5c_open(EQUIV_SELF_PATH, H5C_READ, &self));
+    if (serial == NULL || self == NULL) {
+        if (serial != NULL) H5C_CHECK(h5c_close(serial));
+        if (self != NULL) H5C_CHECK(h5c_close(self));
+        return;
+    }
+    check_root(serial);
+    check_root(self);
+    for (i = 0; i < sizeof paths / sizeof paths[0]; i++) {
+        h5c_dataset_info_t a, b;
+        int same;
+
+        H5C_ASSERT(h5c_exists(serial, paths[i]) && h5c_exists(self, paths[i]),
+                   "equivalence path missing: %s", paths[i]);
+        H5C_CHECK(h5c_dataset_info(serial, paths[i], &a));
+        H5C_CHECK(h5c_dataset_info(self, paths[i], &b));
+        same = a.rank == b.rank && a.type == b.type && a.dims[0] == b.dims[0];
+        if (a.rank == 2 && b.rank == 2) {
+            same = same && a.dims[1] == b.dims[1];
+        }
+        H5C_ASSERT(same, "serial/self structure differs at %s", paths[i]);
+    }
+    H5C_CHECK(h5c_close(serial));
+    H5C_CHECK(h5c_close(self));
+}
+
+static void test_serial_vs_self(void)
+{
+    if (g_me != 0) {
+        return;
+    }
+    write_equivalence_file(EQUIV_SERIAL_PATH, 0);
+    write_equivalence_file(EQUIV_SELF_PATH, 1);
+    compare_equivalence_files();
+}
+
 int main(int argc, char **argv)
 {
     h5c_viz_t  *viz = NULL;
@@ -1077,8 +1177,8 @@ int main(int argc, char **argv)
     H5C_CHECK(h5c_init());
     test_attribute_type();
 
-    H5C_CHECK(h5c_viz_open(PATH, TIME_VALUE, MPI_COMM_WORLD, MPI_INFO_NULL,
-                           &viz));
+    H5C_CHECK(h5c_viz_popen(PATH, TIME_VALUE, MPI_COMM_WORLD, MPI_INFO_NULL,
+                            &viz));
     if (viz != NULL) {
         write_fluid(viz);
         write_dust(viz);
@@ -1114,6 +1214,9 @@ int main(int argc, char **argv)
             H5C_CHECK(h5c_close(f));
         }
     }
+
+    test_serial_vs_self();
+    MPI_Barrier(MPI_COMM_WORLD);
 
     h5c_finalize();
     alarm(0);
