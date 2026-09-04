@@ -51,6 +51,8 @@ if [[ ${#binaries[@]} -eq 0 ]]; then
 fi
 
 cd "${BUILD_DIR}"
+# The visualization example writes a time series into result/.
+mkdir -p result
 for exe in "${binaries[@]}"; do
     echo "=== $(basename "${exe}") on ${NRANKS} ranks ==="
     srun -n "${NRANKS}" "./$(basename "${exe}")"

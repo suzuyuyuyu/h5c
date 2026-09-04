@@ -832,7 +832,7 @@ static h5c_status_t pread_impl(h5c_file_t *file, const char *path, void *buf,
         st = h5c__fail(H5C_ERR_INVALID_ARG, "buffer is NULL for '%s'", path);
     }
     if (st == H5C_OK) {
-        mtype = h5c__mem_type(type);
+        mtype = h5c__mem_type_read(type);
         if (mtype == H5I_INVALID_HID) {
             st = h5c__fail(H5C_ERR_INVALID_ARG,
                            "type %d has no numeric mapping "

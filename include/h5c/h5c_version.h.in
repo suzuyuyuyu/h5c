@@ -1,0 +1,27 @@
+/*
+ * Version and format-scheme identifiers, generated from CMake.
+ */
+#ifndef H5C_VERSION_H
+#define H5C_VERSION_H
+
+/* Product version of this h5c build. */
+#define H5C_VERSION       "@PROJECT_VERSION@"
+#define H5C_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define H5C_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define H5C_VERSION_PATCH @PROJECT_VERSION_PATCH@
+
+/*
+ * Layout version of the visualization HDF5 this build WRITES.
+ *
+ * This is NOT derived from the product version, unlike h5fortran where
+ * scheme == product major. The scheme is a format contract SHARED with
+ * h5fortran, while the three products version independently (see
+ * docs/FORMAT.md), so tying it to h5c's own major would break
+ * interoperability the first time h5c reached 2.0.0 on its own schedule.
+ *
+ * Readers must not assume this value: read the `scheme_version` attribute on
+ * the root group of the file at hand and select behaviour from that.
+ */
+#define H5C_SCHEME_VERSION @H5C_SCHEME_VERSION@
+
+#endif /* H5C_VERSION_H */

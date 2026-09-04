@@ -305,7 +305,7 @@ static h5c_status_t read_scalar_impl(h5c_file_t *file, const char *obj_path,
                          "value is NULL for attribute '%s'", name);
     }
 
-    mtype = h5c__mem_type(type);
+    mtype = h5c__mem_type_read(type);
     if (mtype == H5I_INVALID_HID) {
         return h5c__fail(H5C_ERR_INVALID_ARG,
                          "type %d has no numeric mapping "

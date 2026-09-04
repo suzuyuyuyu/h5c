@@ -348,6 +348,64 @@ h5c_pwrite_interleaved(f, "/fields/velocity", (const void *const *)comps,
 collective 呼び出しの回数が食い違ってデッドロックするためです。
 行を使い切ったランクも空選択で全ての呼び出しに参加します。
 
+## 可視化出力
+
+`h5c/h5c_viz.h` は ParaView 向けの HDF5 時系列を書きます。XML は生成せず、
+Python の `h5xdmf` が後段で XDMF3 を作ります。形式は `h5fortran` の
+`t_phdf5_writer` と同一なので、**同じ Python ツールがどちらの出力も読みます**。
+
+1 ステップ 1 ファイルが想定で、`time` がその位置を決めます。
+
+```c
+#include <h5c/h5c_viz.h>
+
+h5c_viz_t *viz = NULL;
+h5c_viz_mesh_t mesh = {0};      /* 0 と NULL は既定値になる */
+
+h5c_viz_open("result/seq000000.h5", t, MPI_COMM_WORLD, MPI_INFO_NULL, &viz);
+
+mesh.kind              = H5C_VIZ_UNSTRUCTURED;
+mesh.name              = "fluid";
+mesh.topology          = "Tetrahedron";
+mesh.nodes_per_element = 4;
+mesh.num_points        = npoints;    /* このランクの分だけ */
+mesh.num_cells         = ncells;     /* 所有する cell だけ。ghost は除く */
+h5c_viz_begin_mesh(viz, &mesh);
+
+h5c_viz_write_nodes(viz, nodes, H5C_F64);            /* [npoints, 3] */
+h5c_viz_write_connectivity(viz, conn, H5C_I32);      /* ランクローカル 0-origin */
+h5c_viz_write_point_data(viz, "Pressure", p, H5C_F64, 1);
+h5c_viz_write_point_data(viz, "Velocity", v, H5C_F64, 3);   /* → Vector */
+h5c_viz_write_cell_data(viz, "SubdomainID", id, H5C_I32, 1);
+
+h5c_viz_close(viz);
+```
+
+座標を x/y/z で別々に持っているなら `h5c_viz_write_nodes_comps()`、field も
+`_comps` 版があります。ソルバー側で詰め替える必要はありません。
+
+**connectivity はランクローカルな 0-origin で渡します。** writer が自分のランクの
+node offset を加えて global ID にするので、node 番号を揃えるための通信は不要です。
+範囲外の index は拒否されます（1-origin や既に global な ID を渡すのが実際に
+起きる誤りなので）。
+
+点群は `H5C_VIZ_POLYDATA`、`num_cells = 0` で、connectivity を書きません。
+同じファイルに別の `name` で `begin_mesh` を呼べば複数 mesh を置けます。
+
+**すべての呼び出しは collective** です。点数・cell 数はランクごとに違ってよく、
+0 でも構いません。
+
+XDMF の生成は別プロジェクトの `h5xdmf` です。
+
+```sh
+cd ../h5xdmf && uv sync
+uv run h5xdmf "<dir>/result/seq*.h5" --metadata <dir>/result/metadata.h5 --outdir <dir>/result
+```
+
+`fluid.xdmf` のように mesh group ごとに出力されます。動く例は
+[`example/visualization/`](../example/visualization/) にあります。
+レイアウトの詳細は [FORMAT.md](FORMAT.md) を参照してください。
+
 ## テストの実行
 
 ```sh

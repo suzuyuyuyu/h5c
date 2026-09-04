@@ -35,6 +35,8 @@ hid_t h5c__file_type(h5c_type_t type)
     /* Explicit little-endian so files are reproducible across platforms. */
     case H5C_F32:  return H5T_IEEE_F32LE;
     case H5C_F64:  return H5T_IEEE_F64LE;
+    case H5C_I8:   return H5T_STD_I8LE;
+    case H5C_I16:  return H5T_STD_I16LE;
     case H5C_I32:  return H5T_STD_I32LE;
     case H5C_I64:  return H5T_STD_I64LE;
     case H5C_BOOL: return bool_type();
@@ -47,6 +49,8 @@ hid_t h5c__mem_type(h5c_type_t type)
     switch (type) {
     case H5C_F32:  return H5T_NATIVE_FLOAT;
     case H5C_F64:  return H5T_NATIVE_DOUBLE;
+    case H5C_I8:   return H5T_NATIVE_INT8;
+    case H5C_I16:  return H5T_NATIVE_INT16;
     case H5C_I32:  return H5T_NATIVE_INT32;
     case H5C_I64:  return H5T_NATIVE_INT64;
     case H5C_BOOL: return bool_type();
@@ -54,11 +58,23 @@ hid_t h5c__mem_type(h5c_type_t type)
     }
 }
 
+hid_t h5c__mem_type_read(h5c_type_t type)
+{
+    /* See the note in h5c_internal.h: enum -> int converts, int -> enum does
+       not, so reads go through int8 and only writes use the enum. */
+    if (type == H5C_BOOL) {
+        return H5T_NATIVE_INT8;
+    }
+    return h5c__mem_type(type);
+}
+
 size_t h5c_type_size(h5c_type_t type)
 {
     switch (type) {
     case H5C_F32:  return sizeof(float);
     case H5C_F64:  return sizeof(double);
+    case H5C_I8:   return sizeof(int8_t);
+    case H5C_I16:  return sizeof(int16_t);
     case H5C_I32:  return sizeof(int32_t);
     case H5C_I64:  return sizeof(int64_t);
     case H5C_BOOL: return sizeof(h5c_bool_t);
@@ -79,10 +95,16 @@ h5c_type_t h5c__type_from_hid(hid_t tid)
     case H5T_INTEGER:
         if (sz == 8) return H5C_I64;
         if (sz == 4) return H5C_I32;
-        /* One-byte integers are how a plain (non-enum) bool would be stored. */
-        if (sz == 1) return H5C_BOOL;
+        if (sz == 2) return H5C_I16;
+        if (sz == 1) return H5C_I8;
         return H5C_TYPE_UNKNOWN;
     case H5T_ENUM:
+        /*
+         * The only enum h5c writes is the boolean one. A one-byte plain
+         * integer now reports H5C_I8 rather than H5C_BOOL, since narrow
+         * integers became first-class for connectivity data; reading such a
+         * dataset into h5c_bool_t still works, because HDF5 converts.
+         */
         return H5C_BOOL;
     case H5T_STRING:
         return H5C_STRING;

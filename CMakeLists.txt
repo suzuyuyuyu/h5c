@@ -13,6 +13,16 @@ include(CMakePackageConfigHelpers)
 option(H5C_ENABLE_PARALLEL "Build the parallel (MPI) API" OFF)
 option(H5C_BUILD_TESTS "Build the test programs" ${BUILD_TESTING})
 
+# Layout version of the visualization HDF5 this build writes. Shared with
+# h5fortran as a format contract, so it is set here rather than derived from
+# PROJECT_VERSION -- see include/h5c/h5c_version.h.in for why.
+set(H5C_SCHEME_VERSION 1)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/h5c/h5c_version.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/include/h5c/h5c_version.h"
+    @ONLY)
+
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -44,7 +54,7 @@ set(h5c_sources
     src/h5c_interleaved.c
 )
 if(H5C_ENABLE_PARALLEL)
-    list(APPEND h5c_sources src/h5c_parallel.c)
+    list(APPEND h5c_sources src/h5c_parallel.c src/h5c_viz.c)
 endif()
 
 add_library(h5c ${h5c_sources})
@@ -53,6 +63,7 @@ add_library(h5c::h5c ALIAS h5c)
 target_include_directories(h5c
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -94,7 +105,10 @@ install(TARGETS h5c
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
-install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        PATTERN "*.in" EXCLUDE)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/include/h5c/h5c_version.h"
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/h5c)
 
 install(EXPORT h5cTargets
     FILE h5cTargets.cmake

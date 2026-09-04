@@ -125,11 +125,20 @@ static h5c_status_t check_interleaved(h5c_file_t *file, const char *path,
         return h5c__fail(H5C_ERR_INVALID_ARG,
                          "component pointer array is NULL for '%s'", path);
     }
-    for (i = 0; i < ncomp; i++) {
-        if (comps[i] == NULL) {
-            return h5c__fail(H5C_ERR_INVALID_ARG,
-                             "component %lu is NULL for '%s'",
-                             (unsigned long)i, path);
+    /*
+     * With no rows there is nothing to dereference, so NULL components are
+     * legal -- which is what a rank owning an empty block naturally passes,
+     * and what a C++ wrapper gets from an empty std::vector. The parallel
+     * entry points already behaved this way; the serial ones did not, and the
+     * header promised the rule for both.
+     */
+    if (n > 0) {
+        for (i = 0; i < ncomp; i++) {
+            if (comps[i] == NULL) {
+                return h5c__fail(H5C_ERR_INVALID_ARG,
+                                 "component %lu is NULL for '%s'",
+                                 (unsigned long)i, path);
+            }
         }
     }
     *elemsize = h5c_type_size(type);
@@ -341,7 +350,7 @@ static h5c_status_t read_interleaved_impl(h5c_file_t *file, const char *path,
         return st;
     }
 
-    mtype = h5c__mem_type(type);
+    mtype = h5c__mem_type_read(type);
     if (mtype == H5I_INVALID_HID) {
         return h5c__fail(H5C_ERR_INVALID_ARG,
                          "type %d has no numeric mapping for '%s'",
@@ -430,7 +439,8 @@ static h5c_status_t read_component_impl(h5c_file_t *file, const char *path,
     if ((st = h5c__check_common(file, path, 1, &dims1)) != H5C_OK) {
         return st;
     }
-    if (buf == NULL) {
+    /* As for the multi-component forms: no rows, nothing to point at. */
+    if (buf == NULL && n > 0) {
         return h5c__fail(H5C_ERR_INVALID_ARG, "buffer is NULL for '%s'", path);
     }
     if (h5c_type_size(type) == 0) {
@@ -442,7 +452,7 @@ static h5c_status_t read_component_impl(h5c_file_t *file, const char *path,
         return st;
     }
 
-    mtype = h5c__mem_type(type);
+    mtype = h5c__mem_type_read(type);
     if (mtype == H5I_INVALID_HID) {
         return h5c__fail(H5C_ERR_INVALID_ARG,
                          "type %d has no numeric mapping for '%s'",

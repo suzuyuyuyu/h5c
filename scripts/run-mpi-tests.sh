@@ -54,6 +54,13 @@ export OMP_NUM_THREADS=1
 BUILD_DIR="${BUILD_DIR:-${H5C_ROOT}/build/my-intel-mpi}"
 NRANKS="${NRANKS:-${SLURM_NTASKS:-2}}"
 
+# Resolve to an absolute path: the loop below cd's into the build tree, so a
+# BUILD_DIR passed in relative (BUILD_DIR=build/... sbatch ...) would stop
+# resolving the moment we move.
+if [[ "${BUILD_DIR}" != /* ]]; then
+    BUILD_DIR="${H5C_ROOT}/${BUILD_DIR}"
+fi
+
 if [[ ! -f "${BUILD_DIR}/CMakeCache.txt" ]]; then
     set +x
     echo "error: ${BUILD_DIR} is not configured." >&2
@@ -68,8 +75,13 @@ cmake --build "${BUILD_DIR}" -j 4
 # Run each parallel test binary under srun. We deliberately do NOT go through
 # ctest here: ctest would launch the tests with mpiexec at the rank count baked
 # in at configure time, whereas srun inherits this job's allocation.
+# Executables only: the glob would otherwise pick up the .h5 files the tests
+# leave behind next to them.
 shopt -s nullglob
-binaries=("${BUILD_DIR}"/test/test_p*)
+binaries=()
+for f in "${BUILD_DIR}"/test/test_p*; do
+    [[ -f "$f" && -x "$f" ]] && binaries+=("$f")
+done
 shopt -u nullglob
 
 if [[ ${#binaries[@]} -eq 0 ]]; then

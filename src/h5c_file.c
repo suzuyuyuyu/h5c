@@ -1,7 +1,25 @@
 #include "h5c_internal.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/*
+ * Whether `path` can be opened for reading at all. Deliberately plain stdio
+ * rather than access(): the library is built as strict C11, where POSIX
+ * declarations are not visible without a feature macro, and this only needs
+ * to separate "absent" from "present but unusable".
+ */
+static int path_exists(const char *path)
+{
+    FILE *fp = fopen(path, "rb");
+
+    if (fp == NULL) {
+        return 0;
+    }
+    fclose(fp);
+    return 1;
+}
 
 h5c_status_t h5c_open(const char *path, h5c_mode_t mode, h5c_file_t **out)
 {
@@ -35,6 +53,15 @@ h5c_status_t h5c_open(const char *path, h5c_mode_t mode, h5c_file_t **out)
     }
 
     if (fid < 0) {
+        /*
+         * Distinguish "not there" from "there but unusable". h5c.h documents
+         * H5C_ERR_NOT_FOUND for a missing file, and a caller deciding whether
+         * to create a fresh file needs that apart from a corrupt or
+         * permission-denied one, which stays H5C_ERR_HDF5.
+         */
+        if (mode != H5C_TRUNCATE && !path_exists(path)) {
+            return h5c__fail(H5C_ERR_NOT_FOUND, "no such file: '%s'", path);
+        }
         return h5c__fail_hdf5((long)fid, "cannot open '%s' (mode %d)",
                               path, (int)mode);
     }

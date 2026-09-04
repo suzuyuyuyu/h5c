@@ -75,8 +75,25 @@ DATATYPE  H5T_ENUM {
 - `h5fortran` はこれを `logical` として読める。`h5fort_read_lgc_*` は rank しか
   検査せず `H5T_NATIVE_INTEGER` で読むため、HDF5 が自動変換する（検証済み）。
 
-`h5fortran` は `logical` を `H5T_STD_I32LE` で書く。`h5c` がそれを読むときは
-HDF5 が I32→I8 変換を行う。動作上の問題はない。
+`h5fortran` は `logical` を `H5T_STD_I32LE` で書く。`h5c` はこれを `H5C_BOOL`
+として読める。**ただし自動ではない。**
+
+HDF5 は **enum → integer の変換は行うが、integer → enum の変換経路を持たない**
+（実測で確認）。したがって int32 の dataset を bool の enum をメモリ型として
+読もうとすると `H5Dread` が失敗する。そのため `h5c` は次の非対称な扱いをしている。
+
+| 方向 | メモリ型 | ファイル型 |
+|---|---|---|
+| 書き込み | enum | enum（変換なし、memcpy） |
+| 読み込み | `H5T_NATIVE_INT8` | enum でも整数でも可 |
+
+`h5c_bool_t` は `int8_t` なので、読み込みを int8 経由にしても呼び出し側からは
+何も変わらない。この非対称性は「メモリ型を 1 つに揃える」という一見無害な整理で
+壊れるため、`test/test_crosslang.c` が明示的に検査している。
+
+なお当初この文書は「HDF5 が I32→I8 変換を行うので問題ない」と書いていたが、
+これは誤りだった。実際に検証していたのは逆方向（`h5fortran` が `h5c` の enum を
+`H5T_NATIVE_INTEGER` で読む）であり、それを反対方向にも一般化していた。
 
 0 / 1 以外の値は検証されずそのまま書かれる。正規化には一時バッファと
 全要素の走査が必要で、速度優先の方針に反するためである。
@@ -169,14 +186,52 @@ HDF5 Fortran ライブラリの次元反転により、ファイル上は同じ 
 この順序は `h5fortran` にも `h5xdmf` にも文書化されていない
 （`model.py` は成分数から型を推定するだけ）。
 
-## Scheme version
+## 可視化レイアウト（scheme_version = 1）
 
-汎用 I/O のレイアウト（上記すべて）は `scheme_version` を持たない。
-`scheme_version` は可視化用 HDF5 のレイアウトに固有の属性であり、
-可視化 writer を実装する段階で `h5fortran` と共有する。
+`h5c_viz.h` が書く形式。`h5fortran` の `t_phdf5_writer` と同一であり、
+Python の `h5xdmf` がどちらの出力からも XDMF3 を生成する。
+
+```text
+/                              attrs: scheme_version=1 (i32), time (f64)
+/<mesh>/                       attrs: topology_type (固定長文字列), nodes_per_element (i32)
+/<mesh>/geometry/nodes         (total_points, 3)
+/<mesh>/geometry/connectivity  (total_cells, nodes_per_element)   PolyData では無し
+/<mesh>/point_data/<field>     (total_points[, ncomp])
+/<mesh>/cell_data/<field>      (total_cells[, ncomp])
+```
+
+`ncomp > 1` の field には `attribute_type` 属性が付く。
+
+| `ncomp` | `attribute_type` |
+|---|---|
+| 1 | なし（1 次元 dataset。XDMF は Scalar と解釈する） |
+| 3 | `Vector` |
+| 6 | `Tensor6`（成分順 `XX, XY, XZ, YY, YZ, ZZ`） |
+| 9 | `Tensor` |
+| その他 | なし（XDMF に名前がないため） |
+
+1 ファイルに複数 mesh を置ける。`h5xdmf` は mesh group ごとに `.xdmf` を出す。
+
+**connectivity はランクローカルな 0-origin で渡し、writer が global ID に変換する。**
+各ランクは自分が所有する cell だけを書く（ghost cell を書くと重複する）。
+node は cell が参照する全ローカル node を含み、ランク境界での重複は許容される。
+このため呼び出し側に node 番号の統合通信は不要である。
+
+geometry は f32/f64、connectivity は i8/i16/i32/i64、field はそれらすべてに対応する。
+`h5fortran` は real128 にも対応するが、**`h5c` は対応しない**。Fortran の real128 は
+IEEE binary128 で、C では `long double` ではなく `__float128`（コンパイラ拡張）が
+必要になるためである。real128 の dataset は `H5C_TYPE_UNKNOWN` として読まれる。
+
+## 製品バージョンと scheme
 
 製品バージョンは `h5c` / `h5fortran` / `h5cpp` で独立した SemVer とする。
 共有するのはこのフォーマット契約だけである。
+
+`h5fortran` は `scheme_version = 製品 major` としているが、**`h5c` は踏襲しない**。
+scheme は共有する契約であり、`h5c` 自身の都合で major が上がった瞬間に
+相互運用が壊れるためである。`H5C_SCHEME_VERSION`（`h5c_version.h`）は明示的に
+1 とする。**reader はこの値を仮定せず、対象ファイルの `scheme_version` 属性を
+読んで判断する。**
 
 ## 相互運用の検証方法
 

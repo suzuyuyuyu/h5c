@@ -98,8 +98,19 @@ typedef enum h5c_type {
     H5C_I32    = 3,
     H5C_I64    = 4,
     H5C_BOOL   = 5,
-    H5C_STRING = 6
+    H5C_STRING = 6,
+    /* Added for the visualization writer, whose connectivity may be narrow. */
+    H5C_I8     = 7,
+    H5C_I16    = 8
 } h5c_type_t;
+
+/*
+ * h5fortran also supports real128 for geometry and field data. h5c does not:
+ * Fortran's real128 is IEEE binary128, which in C requires a compiler
+ * extension (__float128) rather than `long double`, and nothing in practice
+ * writes quad-precision meshes. A real128 dataset written by h5fortran
+ * therefore reads back as H5C_TYPE_UNKNOWN here.
+ */
 
 /*
  * Booleans are stored as an enum over int8 with members FALSE=0 and TRUE=1.
@@ -385,6 +396,8 @@ size_t h5c_pack_limit(void);
         return h5c_read_component(f, p, buf, comp, n, ENUMV);                 \
     }
 
+H5C_DECLARE_TYPED_IO(i8,   int8_t,     H5C_I8)
+H5C_DECLARE_TYPED_IO(i16,  int16_t,    H5C_I16)
 H5C_DECLARE_TYPED_IO(f32,  float,      H5C_F32)
 H5C_DECLARE_TYPED_IO(f64,  double,     H5C_F64)
 H5C_DECLARE_TYPED_IO(i32,  int32_t,    H5C_I32)

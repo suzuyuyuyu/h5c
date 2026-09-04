@@ -9,6 +9,7 @@
 | `interleaved/` | 成分ごとの配列をベクトル場として保存する | `example_serial_interleaved` |
 | `parallel/` | 分散読み書きと `__partition__` | `example_parallel` |
 | `parallel-interleaved/` | 分散されたベクトル場（成分別配列 + 領域分割） | `example_parallel_interleaved` |
+| `visualization/` | ParaView 向け時系列。XDMF 生成まで通す | `example_parallel_visualization` |
 
 ## ビルド
 
@@ -107,3 +108,32 @@ as stored: 1000 2000 3000 1001 2001 3001 1002 2002 3002 2000 4000 6000 ...
 
 なお属性は group ではなく `<path>/data` に付ける。group には
 `__partition__` も入っているためである。
+
+## 可視化まで通す
+
+`visualization/` は 5 ステップの時系列を書く。四面体 mesh（圧力波と渦速度）と
+粒子群（沈降）の 2 mesh を 1 ファイルに入れる。
+
+```sh
+BUILD_DIR=example/build/intel-mpi sbatch example/run-parallel-example.sh
+```
+
+出力を XDMF3 に変換する。`h5xdmf` は別プロジェクトである。
+
+```sh
+cd ../h5xdmf && uv sync
+R=../h5c/example/build/intel-mpi/result
+uv run h5xdmf "$R/seq*.h5" --metadata $R/metadata.h5 --outdir $R
+```
+
+```text
+manifest: .../result/metadata.h5 (5 steps)
+fluid:    .../result/fluid.xdmf
+particles: .../result/particles.xdmf
+```
+
+`result/fluid.xdmf` と `result/particles.xdmf` を ParaView で開く。
+
+**これは相互運用の検証も兼ねている。** `h5xdmf` は `h5fortran` 用に書かれた
+ツールであり、それが `h5c` の出力をそのまま読めることが、両者のフォーマットが
+同一であることの証明になっている。

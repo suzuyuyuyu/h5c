@@ -5,21 +5,24 @@
 
 ## h5c
 
-- [!] クロス言語テストが未実装
-    - 設計では「`h5c` を一切使わず素の HDF5 C API だけで参照ファイルを組み立てる
-      プログラム」をテストに含める方式に決めた（参照 `.h5` はリポジトリに置かない）。
-      次元順序の退行を常時検出する唯一の手段であり、優先度が高い。
-    - 逆方向は参照 reader が `h5c` の出力の dataspace 次元とバイト列を直接検査する。
-    - `H5C_TEST_H5FORTRAN=ON` の opt-in で、`h5fortran` が手元にある環境でのみ
-      「`h5c` が書いたものを `h5fortran` が読める」方向も確認する。
-- 可視化 writer（設計のフェーズ 3）
-    - `h5fortran` の `t_phdf5_writer` 相当。`scheme_version` を `h5fortran` と共有し、
-      対応型を real128 / int8 / int16 まで拡張する。
-    - `attribute_type` の付与など XDMF 固有の規約はこの層に置く。
-      汎用のパック書き込みは既に `h5c_write_interleaved` にある。
+- [x] クロス言語テスト（`test/test_crosslang.c`）
+    - 素の HDF5 C API だけで参照ファイルを組み立て、次元順序・ディスク上の型・
+      bool の enum メンバ・文字列の SPACEPAD・インターリーブのバイト配置・
+      ゼロ長 extent を固定する。参照 `.h5` はコミットしない。
+    - `h5fortran` の実出力があればそれとも突き合わせる（無ければスキップ）。
+- [x] 可視化 writer（`h5c_viz.h`、`src/h5c_viz.c`）
+    - `scheme_version = 1`。`h5xdmf` が `h5c` の出力から XDMF3 を生成できることを
+      実測で確認した。int8 / int16 を追加した。
+    - real128 は非対応とした。C では `__float128` というコンパイラ拡張が必要で、
+      実用例もないため。詳細は `docs/FORMAT.md`。
 - chunking と圧縮が未対応
     - `h5fortran` も未対応。並列 I/O の性能要件が具体化してから検討する。
     - bool 配列や mask は圧縮がよく効くはずで、最初の候補になる。
+- interleaved 書き込みの pack と strided hyperslab の性能比較
+    - 現在は連続 I/O を優先して、独立した成分配列をタイル単位で pack している。
+    - 実際の並列ファイルシステム上で、現在の方式と成分ごとの collective strided
+      write を同一条件で測定する。read-modify-write の発生有無、pack 時間、
+      `H5Dwrite` と close/flush の時間を分けて確認し、実装変更は測定結果を見て判断する。
 - [?] 複数次元の同時分割
     - `__partition__` が 1 次元の境界配列である以上、形式を変えないと表現できない。
       実需が出るまで行わない。
@@ -29,6 +32,12 @@
     - `h5fortran` も未対応。当面は同様とする。
 - [?] `uint` 系と `float16`
     - 実需が出てから追加する。型を増やすコストは enum と写像テーブルの各 1 行。
+
+## h5cpp 側
+
+- `h5cpp` の可視化ラッパー（`h5cpp_viz.hpp`）
+    - `h5c_viz.h` の薄い RAII / テンプレートラッパー。成分は view で受け、
+      C API が検証できない要素数を I/O 前に検査する。
 
 ## 検証されていないこと
 

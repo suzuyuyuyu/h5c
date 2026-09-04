@@ -59,6 +59,20 @@ h5c_status_t h5c__ensure_init(void);
 hid_t h5c__file_type(h5c_type_t type);
 hid_t h5c__mem_type(h5c_type_t type);
 
+/*
+ * Memory type to use when READING. Identical to h5c__mem_type() except for
+ * H5C_BOOL, where it is H5T_NATIVE_INT8 rather than the boolean enum.
+ *
+ * HDF5 converts an enum to an integer but NOT an integer to an enum, so a
+ * plain int dataset -- which is exactly what h5fortran writes for `logical` --
+ * cannot be read through the enum. Reading through int8 works for both
+ * representations, and h5c_bool_t is int8_t, so nothing else changes.
+ *
+ * Writing still uses the enum for both memory and file: that pairing needs no
+ * conversion at all, and int8 -> enum is the direction HDF5 refuses.
+ */
+hid_t h5c__mem_type_read(h5c_type_t type);
+
 /* Best-effort reverse mapping of a stored datatype. */
 h5c_type_t h5c__type_from_hid(hid_t tid);
 
