@@ -200,11 +200,11 @@ Python の `h5xdmf` がどちらの出力からも XDMF3 を生成する。
 /<mesh>/cell_data/<field>      (total_cells[, ncomp])
 ```
 
-`ncomp > 1` の field には `attribute_type` 属性が付く。
+field には `attribute_type` 属性が付く（`h5fortran` の出力と一致することを実測で確認）。
 
 | `ncomp` | `attribute_type` |
 |---|---|
-| 1 | なし（1 次元 dataset。XDMF は Scalar と解釈する） |
+| 1 | `Scalar`（dataset は 1 次元） |
 | 3 | `Vector` |
 | 6 | `Tensor6`（成分順 `XX, XY, XZ, YY, YZ, ZZ`） |
 | 9 | `Tensor` |

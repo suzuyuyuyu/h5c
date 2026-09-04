@@ -174,9 +174,10 @@ h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
  * Point and cell fields, written to <mesh>/point_data/<name> and
  * <mesh>/cell_data/<name>.
  *
- * ncomp == 1 gives a 1-D dataset; ncomp of 3, 6 or 9 gives (n, ncomp) plus
- * the matching attribute_type. Other values are accepted as (n, ncomp) but
- * carry no attribute_type, since XDMF has no name for them.
+ * ncomp == 1 gives a 1-D dataset tagged attribute_type = "Scalar"; ncomp of
+ * 3, 6 or 9 gives (n, ncomp) tagged Vector, Tensor6 or Tensor. Other values
+ * are accepted as (n, ncomp) but carry no attribute_type, since XDMF has no
+ * name for them.
  *
  * For ncomp == 6 the XDMF component order is XX, XY, XZ, YY, YZ, ZZ.
  *
