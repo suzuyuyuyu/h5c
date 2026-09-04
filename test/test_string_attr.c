@@ -210,6 +210,107 @@ static void test_attr_scalars(h5c_file_t *f)
     }
 }
 
+static void test_numeric_attr_type(h5c_file_t *f, h5c_type_t type,
+                                   const char *label, const void *scalar,
+                                   const void *array, size_t size)
+{
+    static const char *const objects[] = { "/rank/two", "/rank", "/" };
+    unsigned char *got_scalar;
+    unsigned char *got_array;
+    char           scalar_name[32];
+    char           array_name[32];
+    size_t         i;
+
+    got_scalar = (unsigned char *)calloc(1, size);
+    got_array  = (unsigned char *)calloc(3, size);
+    if (got_scalar == NULL || got_array == NULL) {
+        H5C_FAILF("cannot allocate numeric attribute test buffers");
+        free(got_scalar);
+        free(got_array);
+        return;
+    }
+    snprintf(scalar_name, sizeof scalar_name, "%s_scalar", label);
+    snprintf(array_name, sizeof array_name, "%s_array", label);
+
+    for (i = 0; i < sizeof objects / sizeof objects[0]; i++) {
+        H5C_CHECK(h5c_write_attr_scalar(f, objects[i], scalar_name, scalar,
+                                        type));
+        H5C_CHECK(h5c_read_attr_scalar(f, objects[i], scalar_name, got_scalar,
+                                       type));
+        H5C_ASSERT(memcmp(got_scalar, scalar, size) == 0,
+                   "%s on %s: scalar round-trip differs", label, objects[i]);
+
+        H5C_CHECK(h5c_write_attr_array(f, objects[i], array_name, array,
+                                       type, 3));
+        H5C_CHECK(h5c_read_attr_array(f, objects[i], array_name, got_array,
+                                      type, 3));
+        H5C_ASSERT(memcmp(got_array, array, 3 * size) == 0,
+                   "%s on %s: array round-trip differs", label, objects[i]);
+    }
+
+    free(got_scalar);
+    free(got_array);
+}
+
+static void test_attr_arrays(h5c_file_t *f)
+{
+    const float      f32[3] = { 1.25f, -3.5f, 8.75f };
+    const double     f64[3] = { -2.125, 7.5, 19.25 };
+    const int8_t     i8[3]  = { -7, 2, 101 };
+    const int16_t    i16[3] = { -3001, 17, 22002 };
+    const int32_t    i32[3] = { -700001, 23, 9000007 };
+    const int64_t    i64[3] = { -9000000001LL, 31, 700000000003LL };
+    const h5c_bool_t b[3]   = { H5C_TRUE, H5C_FALSE, H5C_FALSE };
+    size_t           count;
+    int32_t          got[4] = { 0, 0, 0, 0 };
+    const int32_t    first[4] = { 41, -3, 700, 19 };
+    const int32_t    second[2] = { -11, 83 };
+
+    test_numeric_attr_type(f, H5C_F32, "f32", &f32[1], f32, sizeof f32[0]);
+    test_numeric_attr_type(f, H5C_F64, "f64", &f64[1], f64, sizeof f64[0]);
+    test_numeric_attr_type(f, H5C_I8, "i8", &i8[1], i8, sizeof i8[0]);
+    test_numeric_attr_type(f, H5C_I16, "i16", &i16[1], i16, sizeof i16[0]);
+    test_numeric_attr_type(f, H5C_I32, "i32", &i32[1], i32, sizeof i32[0]);
+    test_numeric_attr_type(f, H5C_I64, "i64", &i64[1], i64, sizeof i64[0]);
+    test_numeric_attr_type(f, H5C_BOOL, "bool", &b[1], b, sizeof b[0]);
+
+    H5C_CHECK(h5c_attr_length(f, "/rank/two", "f64_scalar", &count));
+    H5C_ASSERT_EQ_SIZE(count, 1, "scalar attribute length");
+    H5C_CHECK(h5c_attr_length(f, "/rank/two", "f64_array", &count));
+    H5C_ASSERT_EQ_SIZE(count, 3, "array attribute length");
+
+    H5C_CHECK(h5c_write_attr_array(f, "/rank", "replace_array", first,
+                                   H5C_I32, 4));
+    H5C_CHECK(h5c_write_attr_array(f, "/rank", "replace_array", second,
+                                   H5C_I32, 2));
+    H5C_CHECK(h5c_attr_length(f, "/rank", "replace_array", &count));
+    H5C_ASSERT_EQ_SIZE(count, 2, "replaced array attribute length");
+    H5C_CHECK(h5c_read_attr_array(f, "/rank", "replace_array", got,
+                                  H5C_I32, 2));
+    H5C_ASSERT(memcmp(got, second, sizeof second) == 0,
+               "replacement array values differ");
+
+    H5C_CHECK_FAILS(h5c_read_attr_array(f, "/rank", "replace_array", got,
+                                        H5C_I32, 4),
+                    H5C_ERR_SHAPE_MISMATCH);
+    H5C_CHECK_FAILS(h5c_attr_length(f, "/rank", "missing_array", &count),
+                    H5C_ERR_NOT_FOUND);
+    H5C_CHECK_FAILS(h5c_read_attr_array(f, "/rank", "missing_array", got,
+                                        H5C_I32, 2),
+                    H5C_ERR_NOT_FOUND);
+    H5C_CHECK_FAILS(h5c_read_attr_array(f, "/no/such/object", "array", got,
+                                        H5C_I32, 2),
+                    H5C_ERR_NOT_FOUND);
+
+    /* Zero-length arrays follow the dataset policy and need no buffer. */
+    H5C_CHECK(h5c_write_attr_array(f, "/", "empty_array", NULL, H5C_F64, 0));
+    H5C_CHECK(h5c_attr_length(f, "/", "empty_array", &count));
+    H5C_ASSERT_EQ_SIZE(count, 0, "empty array attribute length");
+    H5C_CHECK(h5c_read_attr_array(f, "/", "empty_array", NULL, H5C_F64, 0));
+
+    h5c_file_clear_status(f);
+}
+
 /*
  * Failure paths. Each of these must leave *out untouched (NULL) so that a
  * caller which frees unconditionally cannot double-free or leak.
@@ -266,6 +367,7 @@ static void test_readonly(void)
     h5c_file_t *f = NULL;
     char       *s = NULL;
     double      dt = 0.0;
+    const double array[3] = { 2.5, -1.0, 9.25 };
 
     H5C_CHECK(h5c_open(PATH, H5C_READ, &f));
     if (f == NULL) {
@@ -294,6 +396,9 @@ static void test_readonly(void)
     H5C_CHECK_FAILS(h5c_write_attr_scalar(f, "/rank/two", "dt", &dt,
                                           H5C_F64),
                     H5C_ERR_STATE);
+    H5C_CHECK_FAILS(h5c_write_attr_array(f, "/rank/two", "array", array,
+                                         H5C_F64, 3),
+                    H5C_ERR_STATE);
 
     h5c_file_clear_status(f);
     H5C_CHECK(h5c_close(f));
@@ -316,6 +421,7 @@ int main(void)
     test_attr_targets(f);
     test_attr_exists(f);
     test_attr_scalars(f);
+    test_attr_arrays(f);
     test_errors(f);
 
     H5C_CHECK(h5c_close(f));

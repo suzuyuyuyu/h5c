@@ -300,6 +300,34 @@ h5c_status_t h5c_read_attr_scalar(h5c_file_t *file, const char *obj_path,
 
 int h5c_attr_exists(h5c_file_t *file, const char *obj_path, const char *name);
 
+/*
+ * Numeric ARRAY attributes: the value is a 1-D dataspace of `count` elements,
+ * stored with the same little-endian file types as datasets. That is what
+ * h5fortran writes for the same thing, so the two interoperate.
+ *
+ * Intended for the short metadata vectors that annotate a mesh -- domain
+ * bounds, an origin, a grid spacing. Anything large belongs in a dataset:
+ * HDF5 keeps attributes in the object header, and a big one bloats it.
+ *
+ * `count` must match the stored length exactly on read; ask
+ * h5c_attr_length() first when you do not already know it.
+ */
+h5c_status_t h5c_write_attr_array(h5c_file_t *file, const char *obj_path,
+                                  const char *name, const void *values,
+                                  h5c_type_t type, size_t count);
+
+h5c_status_t h5c_read_attr_array(h5c_file_t *file, const char *obj_path,
+                                 const char *name, void *values,
+                                 h5c_type_t type, size_t count);
+
+/*
+ * Elements in an attribute: 1 for a scalar, n for an array. This is to
+ * attributes what h5c_dataset_info() is to datasets -- the read side cannot
+ * size its buffer without it.
+ */
+h5c_status_t h5c_attr_length(h5c_file_t *file, const char *obj_path,
+                             const char *name, size_t *count);
+
 /* ------------------------------------------------------------------ */
 /* Interleaved multi-component fields                                  */
 /* ------------------------------------------------------------------ */

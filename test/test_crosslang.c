@@ -139,6 +139,68 @@ static void ref_write(hid_t fid, const char *path, hid_t ftype, hid_t mtype,
     H5Sclose(sid);
 }
 
+static void ref_write_attr(hid_t fid, const char *obj_path, const char *name,
+                           hid_t ftype, hid_t mtype, hsize_t count,
+                           const void *buf)
+{
+    hid_t oid, sid, aid;
+
+    oid = H5Oopen(fid, obj_path, H5P_DEFAULT);
+    if (oid < 0) {
+        H5C_FAILF("H5Oopen failed for '%s'", obj_path);
+        return;
+    }
+    sid = H5Screate_simple(1, &count, NULL);
+    if (sid < 0) {
+        H5C_FAILF("H5Screate_simple failed for attribute '%s'", name);
+        H5Oclose(oid);
+        return;
+    }
+    aid = H5Acreate2(oid, name, ftype, sid, H5P_DEFAULT, H5P_DEFAULT);
+    if (aid < 0) {
+        H5C_FAILF("H5Acreate2 failed for attribute '%s'", name);
+    } else {
+        if (H5Awrite(aid, mtype, buf) < 0) {
+            H5C_FAILF("H5Awrite failed for attribute '%s'", name);
+        }
+        H5Aclose(aid);
+    }
+    H5Sclose(sid);
+    H5Oclose(oid);
+}
+
+static void ref_check_attr_dims(hid_t fid, const char *obj_path,
+                                const char *name, hsize_t want)
+{
+    hid_t   oid, aid, sid;
+    hsize_t got[1] = { 0 };
+    int     rank;
+
+    oid = H5Oopen(fid, obj_path, H5P_DEFAULT);
+    aid = (oid >= 0) ? H5Aopen(oid, name, H5P_DEFAULT) : H5I_INVALID_HID;
+    sid = (aid >= 0) ? H5Aget_space(aid) : H5I_INVALID_HID;
+    if (oid < 0 || aid < 0 || sid < 0) {
+        H5C_FAILF("cannot inspect attribute '%s' on '%s'", name, obj_path);
+    } else {
+        rank = H5Sget_simple_extent_ndims(sid);
+        H5C_ASSERT(rank == 1, "attribute '%s' rank %d, want 1", name, rank);
+        if (rank == 1 && H5Sget_simple_extent_dims(sid, got, NULL) >= 0) {
+            H5C_ASSERT_EQ_SIZE(got[0], want, name);
+        } else if (rank == 1) {
+            H5C_FAILF("H5Sget_simple_extent_dims failed for '%s'", name);
+        }
+    }
+    if (sid >= 0) {
+        H5Sclose(sid);
+    }
+    if (aid >= 0) {
+        H5Aclose(aid);
+    }
+    if (oid >= 0) {
+        H5Oclose(oid);
+    }
+}
+
 /* The boolean enum as docs/FORMAT.md declares it. The caller closes it. */
 static hid_t ref_bool_type(void)
 {
@@ -327,6 +389,8 @@ static void build_reference_file(void)
                                  ' ', ' ', ' ', ' ', ' ', ' ',
                                  ' ', ' ', ' ', ' ' };
     const hsize_t zero_dims[2] = { 0, 2 };
+    const int32_t attr_i32[4] = { 71, -8, 3005, 42 };
+    const int32_t attr_bool_i32[4] = { 1, 1, 0, 1 };
 
     fill_3d(d3);
 
@@ -338,6 +402,11 @@ static void build_reference_file(void)
 
     ref_write(fid, "/rank/two", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, 2,
               k_2d_hdims, k_2d);
+    ref_write_attr(fid, "/rank/two", "reference_array", H5T_STD_I32LE,
+                   H5T_NATIVE_INT32, 4, attr_i32);
+    ref_check_attr_dims(fid, "/rank/two", "reference_array", 4);
+    ref_write_attr(fid, "/rank/two", "reference_bool_array", H5T_STD_I32LE,
+                   H5T_NATIVE_INT32, 4, attr_bool_i32);
     ref_write(fid, "/rank/three", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, 3,
               k_3d_hdims, d3);
     ref_write(fid, "/scalar/r64", H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE, 0, NULL,
@@ -605,6 +674,28 @@ static void read_reference_empty(h5c_file_t *f)
     h5c_free(alloc);
 }
 
+static void read_reference_attr(h5c_file_t *f)
+{
+    const int32_t want[4] = { 71, -8, 3005, 42 };
+    int32_t       got[4] = { 0, 0, 0, 0 };
+    const h5c_bool_t want_bool[4] = { H5C_TRUE, H5C_TRUE,
+                                      H5C_FALSE, H5C_TRUE };
+    h5c_bool_t    got_bool[4] = { H5C_FALSE, H5C_FALSE,
+                                  H5C_FALSE, H5C_FALSE };
+    size_t        count = 0;
+
+    H5C_CHECK(h5c_attr_length(f, "/rank/two", "reference_array", &count));
+    H5C_ASSERT_EQ_SIZE(count, 4, "bare-HDF5 attribute length through h5c");
+    H5C_CHECK(h5c_read_attr_array(f, "/rank/two", "reference_array", got,
+                                  H5C_I32, 4));
+    H5C_ASSERT(memcmp(got, want, sizeof want) == 0,
+               "bare-HDF5 attribute values differ through h5c");
+    H5C_CHECK(h5c_read_attr_array(f, "/rank/two", "reference_bool_array",
+                                  got_bool, H5C_BOOL, 4));
+    H5C_ASSERT(memcmp(got_bool, want_bool, sizeof want_bool) == 0,
+               "integer attribute did not convert to h5c bool values");
+}
+
 /* ------------------------------------------------------------------ */
 /* phase C: h5c writes                                                 */
 /* ------------------------------------------------------------------ */
@@ -634,6 +725,7 @@ static void write_with_h5c(void)
     const double t_zz[2] = { 11, 12 };
     const double *ten[6] = { t_xx, t_xy, t_xz, t_yy, t_yz, t_zz };
     const size_t  empty_dims[2] = { 0, 3 };
+    const double  attr_f64[5] = { -1.25, 8.5, 3.125, -17.0, 42.75 };
 
     fill_3d(d3);
 
@@ -643,6 +735,8 @@ static void write_with_h5c(void)
     }
 
     H5C_CHECK(h5c_write_f64(f, "/rank/two", k_2d, 2, k_2d_dims));
+    H5C_CHECK(h5c_write_attr_array(f, "/rank/two", "h5c_array", attr_f64,
+                                   H5C_F64, 5));
     H5C_CHECK(h5c_write_f64(f, "/rank/three", d3, 3, k_3d_dims));
     H5C_CHECK(h5c_write_f64_scalar(f, "/scalar/r64", 4.0));
 
@@ -813,6 +907,46 @@ static void inspect_h5c_file(void)
     ref_check_dims(fid, "/rank/two", 2, k_2d_hdims);
     ref_check_numeric_type(fid, "/rank/two", H5T_FLOAT, 8, 0);
     ref_check_bytes(fid, "/rank/two", k_2d, sizeof k_2d);
+
+    /* Attribute arrays are rank 1 on disk, with the requested extent. */
+    {
+        const double want[5] = { -1.25, 8.5, 3.125, -17.0, 42.75 };
+        double       got[5] = { 0, 0, 0, 0, 0 };
+        hsize_t      dims[1] = { 0 };
+        hid_t        oid, aid, sid, tid;
+        int          rank;
+
+        oid = H5Oopen(fid, "/rank/two", H5P_DEFAULT);
+        aid = (oid >= 0) ? H5Aopen(oid, "h5c_array", H5P_DEFAULT)
+                         : H5I_INVALID_HID;
+        sid = (aid >= 0) ? H5Aget_space(aid) : H5I_INVALID_HID;
+        tid = (aid >= 0) ? H5Aget_type(aid) : H5I_INVALID_HID;
+        if (oid < 0 || aid < 0 || sid < 0 || tid < 0) {
+            H5C_FAILF("cannot inspect h5c array attribute");
+        } else {
+            rank = H5Sget_simple_extent_ndims(sid);
+            H5C_ASSERT(rank == 1, "h5c array attribute rank %d, want 1", rank);
+            if (rank == 1 && H5Sget_simple_extent_dims(sid, dims, NULL) >= 0) {
+                H5C_ASSERT_EQ_SIZE(dims[0], 5, "h5c array attribute extent");
+            } else if (rank == 1) {
+                H5C_FAILF("H5Sget_simple_extent_dims failed for h5c_array");
+            }
+            H5C_ASSERT(H5Tget_class(tid) == H5T_FLOAT &&
+                       H5Tget_size(tid) == 8 &&
+                       H5Tget_order(tid) == H5T_ORDER_LE,
+                       "h5c array attribute is not IEEE F64LE");
+            if (H5Aread(aid, H5T_NATIVE_DOUBLE, got) < 0) {
+                H5C_FAILF("H5Aread failed for h5c_array");
+            } else {
+                H5C_ASSERT(memcmp(got, want, sizeof want) == 0,
+                           "h5c array attribute values differ in bare HDF5");
+            }
+        }
+        if (tid >= 0) H5Tclose(tid);
+        if (sid >= 0) H5Sclose(sid);
+        if (aid >= 0) H5Aclose(aid);
+        if (oid >= 0) H5Oclose(oid);
+    }
 
     {
         double d3[K_3D_N];
@@ -1034,6 +1168,7 @@ int main(void)
         read_reference_shapes(f);
         read_reference_types(f);
         read_reference_empty(f);
+        read_reference_attr(f);
         H5C_CHECK(h5c_close(f));
     }
 

@@ -7,8 +7,8 @@
  * h5fortran's h5fort_write_attribute writes.
  *
  * Writing an attribute that already exists replaces it (delete then create),
- * matching h5fortran. Array attributes are out of scope by design: large data
- * belongs in a dataset.
+ * matching h5fortran. Numeric arrays are deliberately one-dimensional and
+ * small; large data belongs in a dataset, not an object's header.
  */
 #include "h5c_internal.h"
 
@@ -220,9 +220,10 @@ h5c_status_t h5c_read_attr_str(h5c_file_t *file, const char *obj_path,
 /* scalar numeric attributes                                           */
 /* ------------------------------------------------------------------ */
 
-static h5c_status_t write_scalar_impl(h5c_file_t *file, const char *obj_path,
-                                      const char *name, const void *value,
-                                      h5c_type_t type)
+static h5c_status_t write_numeric_impl(h5c_file_t *file, const char *obj_path,
+                                       const char *name, const void *values,
+                                       h5c_type_t type, size_t count,
+                                       int scalar)
 {
     h5c_status_t st;
     hid_t        oid = H5I_INVALID_HID, sid = H5I_INVALID_HID;
@@ -231,7 +232,7 @@ static h5c_status_t write_scalar_impl(h5c_file_t *file, const char *obj_path,
     if ((st = check_args(file, obj_path, name)) != H5C_OK) {
         return st;
     }
-    if (value == NULL) {
+    if (values == NULL && (scalar || count > 0)) {
         return h5c__fail(H5C_ERR_INVALID_ARG,
                          "value is NULL for attribute '%s'", name);
     }
@@ -251,11 +252,11 @@ static h5c_status_t write_scalar_impl(h5c_file_t *file, const char *obj_path,
         return st;
     }
 
-    sid = H5Screate(H5S_SCALAR);
+    sid = scalar ? H5Screate(H5S_SCALAR) : h5c__make_space(1, &count);
     if (sid < 0) {
         H5Oclose(oid);
         return h5c__fail_hdf5((long)sid,
-                              "cannot create a scalar space for '%s'", name);
+                              "cannot create a dataspace for '%s'", name);
     }
     if ((st = drop_existing(oid, obj_path, name)) != H5C_OK) {
         goto done;
@@ -267,7 +268,7 @@ static h5c_status_t write_scalar_impl(h5c_file_t *file, const char *obj_path,
                             name, obj_path);
         goto done;
     }
-    if (H5Awrite(aid, mtype, value) < 0) {
+    if ((scalar || count > 0) && H5Awrite(aid, mtype, values) < 0) {
         st = h5c__fail_hdf5(-1, "H5Awrite failed for '%s' on '%s'",
                             name, obj_path);
     }
@@ -286,21 +287,25 @@ h5c_status_t h5c_write_attr_scalar(h5c_file_t *file, const char *obj_path,
                                    h5c_type_t type)
 {
     return h5c__record(file,
-                       write_scalar_impl(file, obj_path, name, value, type));
+                       write_numeric_impl(file, obj_path, name, value, type,
+                                          1, 1));
 }
 
-static h5c_status_t read_scalar_impl(h5c_file_t *file, const char *obj_path,
-                                     const char *name, void *value,
-                                     h5c_type_t type)
+static h5c_status_t read_numeric_impl(h5c_file_t *file, const char *obj_path,
+                                      const char *name, void *values,
+                                      h5c_type_t type, size_t count,
+                                      int scalar)
 {
     h5c_status_t st;
     hid_t        oid = H5I_INVALID_HID, aid = H5I_INVALID_HID;
     hid_t        sid = H5I_INVALID_HID, mtype;
+    hsize_t      dims[1];
+    int          rank;
 
     if ((st = check_args(file, obj_path, name)) != H5C_OK) {
         return st;
     }
-    if (value == NULL) {
+    if (values == NULL && (scalar || count > 0)) {
         return h5c__fail(H5C_ERR_INVALID_ARG,
                          "value is NULL for attribute '%s'", name);
     }
@@ -324,14 +329,36 @@ static h5c_status_t read_scalar_impl(h5c_file_t *file, const char *obj_path,
         st = h5c__fail_hdf5((long)sid, "cannot query the space of '%s'", name);
         goto done;
     }
-    if (H5Sget_simple_extent_npoints(sid) != 1) {
+    rank = H5Sget_simple_extent_ndims(sid);
+    if (rank < 0) {
+        st = h5c__fail_hdf5((long)rank,
+                            "cannot query the rank of '%s'", name);
+        goto done;
+    }
+    if (scalar && H5Sget_simple_extent_npoints(sid) != 1) {
         st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
                        "attribute '%s' on '%s' is not a scalar",
                        name, obj_path);
         goto done;
     }
+    if (!scalar && (rank != 1 ||
+                    H5Sget_simple_extent_dims(sid, dims, NULL) < 0)) {
+        st = (rank != 1)
+                 ? h5c__fail(H5C_ERR_SHAPE_MISMATCH,
+                             "attribute '%s' on '%s' is not a 1-D array",
+                             name, obj_path)
+                 : h5c__fail_hdf5(-1, "cannot query the length of '%s'", name);
+        goto done;
+    }
+    if (!scalar && dims[0] != (hsize_t)count) {
+        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
+                       "attribute '%s' on '%s' has length %lu, expected %lu",
+                       name, obj_path, (unsigned long)dims[0],
+                       (unsigned long)count);
+        goto done;
+    }
     /* HDF5 converts between the stored type and `mtype` where it can. */
-    if (H5Aread(aid, mtype, value) < 0) {
+    if ((scalar || count > 0) && H5Aread(aid, mtype, values) < 0) {
         st = h5c__fail_hdf5(-1, "H5Aread failed for '%s' on '%s'",
                             name, obj_path);
     }
@@ -350,7 +377,76 @@ h5c_status_t h5c_read_attr_scalar(h5c_file_t *file, const char *obj_path,
                                   h5c_type_t type)
 {
     return h5c__record(file,
-                       read_scalar_impl(file, obj_path, name, value, type));
+                       read_numeric_impl(file, obj_path, name, value, type,
+                                         1, 1));
+}
+
+h5c_status_t h5c_write_attr_array(h5c_file_t *file, const char *obj_path,
+                                  const char *name, const void *values,
+                                  h5c_type_t type, size_t count)
+{
+    return h5c__record(file,
+                       write_numeric_impl(file, obj_path, name, values, type,
+                                          count, 0));
+}
+
+h5c_status_t h5c_read_attr_array(h5c_file_t *file, const char *obj_path,
+                                 const char *name, void *values,
+                                 h5c_type_t type, size_t count)
+{
+    return h5c__record(file,
+                       read_numeric_impl(file, obj_path, name, values, type,
+                                         count, 0));
+}
+
+static h5c_status_t attr_length_impl(h5c_file_t *file, const char *obj_path,
+                                     const char *name, size_t *count)
+{
+    h5c_status_t st;
+    hid_t        oid = H5I_INVALID_HID, aid = H5I_INVALID_HID;
+    hid_t        sid = H5I_INVALID_HID;
+    hssize_t     npoints;
+
+    if (count == NULL) {
+        return h5c__fail(H5C_ERR_INVALID_ARG, "h5c_attr_length: count is NULL");
+    }
+    if ((st = check_args(file, obj_path, name)) != H5C_OK) {
+        return st;
+    }
+    if ((st = open_object(file, obj_path, &oid)) != H5C_OK) {
+        return st;
+    }
+    if ((st = open_attr(oid, obj_path, name, &aid)) != H5C_OK) {
+        H5Oclose(oid);
+        return st;
+    }
+    sid = H5Aget_space(aid);
+    if (sid < 0) {
+        st = h5c__fail_hdf5((long)sid, "cannot query the space of '%s'", name);
+        goto done;
+    }
+    npoints = H5Sget_simple_extent_npoints(sid);
+    if (npoints < 0) {
+        st = h5c__fail_hdf5((long)npoints,
+                            "cannot query the length of '%s'", name);
+        goto done;
+    }
+    *count = (size_t)npoints;
+
+done:
+    if (sid >= 0) {
+        H5Sclose(sid);
+    }
+    H5Aclose(aid);
+    H5Oclose(oid);
+    return st;
+}
+
+h5c_status_t h5c_attr_length(h5c_file_t *file, const char *obj_path,
+                             const char *name, size_t *count)
+{
+    return h5c__record(file,
+                       attr_length_impl(file, obj_path, name, count));
 }
 
 /* ------------------------------------------------------------------ */

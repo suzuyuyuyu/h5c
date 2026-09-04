@@ -116,3 +116,14 @@ h5c が同じバイト列を生成する）。
 - 並列テストは `sbatch scripts/run-mpi-tests.sh` で投入する
 - `stdout/` と `stderr/` はリポジトリに存在させている。Slurm がジョブ開始前に
   これらを開くため、無いとジョブが 1 秒で失敗し出力も残らない
+
+### 追加（属性の拡張）
+
+- 数値**配列**属性（`h5c_write_attr_array` / `h5c_read_attr_array`）と、要素数を
+  問い合わせる `h5c_attr_length`。スカラー属性にも使えて 1 を返す。
+- ディスク上は長さ `count` の 1 次元 dataspace で、型は dataset と同じ
+  リトルエンディアン。`h5fortran` が同じ形式で読み書きすることを実測で確認した
+  （h5fortran の Fortran プログラムが h5c の書いた配列属性を読めること、
+  および h5cpp が h5fortran の書いた配列属性を読めること）。
+- 用途は mesh を注釈する短いベクトル（領域の境界、原点、格子間隔）。
+  HDF5 は属性を object header に置くため、大きなデータは dataset にする。
