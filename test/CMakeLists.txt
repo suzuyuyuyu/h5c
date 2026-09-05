@@ -30,6 +30,11 @@ foreach(src IN LISTS h5c_serial_tests)
     set_tests_properties(${name} PROPERTIES LABELS "quick")
 endforeach()
 
+get_filename_component(h5fortran_artifact_default
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../h5fortran/build/test/test-serial.h5" ABSOLUTE)
+target_compile_definitions(test_crosslang PRIVATE
+    H5C_H5FORTRAN_ARTIFACT_DEFAULT="${h5fortran_artifact_default}")
+
 # Number of ranks used when the MPI tests are run from a job script.
 set(H5C_TEST_NRANKS 2 CACHE STRING "MPI ranks for the parallel tests")
 

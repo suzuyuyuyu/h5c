@@ -452,6 +452,20 @@ uv run h5xdmf "<dir>/result/seq*.h5" --metadata <dir>/result/metadata.h5 --outdi
 
 ## テストの実行
 
+`test_crosslang` の phase E は、h5fortran の逐次テストが生成した
+`test-serial.h5` を読み込みます。環境変数 `H5C_H5FORTRAN_ARTIFACT` が設定されて
+いればその値を優先し、未設定なら CMake 構成時にソースディレクトリから求めた
+`../h5fortran/build/test/test-serial.h5` の絶対パスを使います。
+別のビルド先を使う場合は、生成済みファイルの絶対パスを指定してください。
+
+```sh
+H5C_H5FORTRAN_ARTIFACT="$(realpath ../h5fortran/build/serial/test/test-serial.h5)" \
+  ./build/gnu/test/test_crosslang
+```
+
+ファイルを開けない場合、phase E は非致命的に省略されます。
+省略の通知と最終結果の `phase E SKIPPED` を確認してください。
+
 ```sh
 ctest --preset my-intel             # 逐次テスト。ログインノードで可
 sbatch scripts/run-mpi-tests.sh     # 並列テスト。バッチ投入のみ

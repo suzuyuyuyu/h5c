@@ -32,9 +32,6 @@ H5C_TEST_MAIN_STATE;
 #define REF_PATH "test_crosslang_ref.h5"   /* written by the bare HDF5 API */
 #define H5C_PATH "test_crosslang_h5c.h5"   /* written by h5c               */
 
-#define H5FORTRAN_ARTIFACT \
-    "/home/b/b39007/workspace/dev-hdf5/h5fortran/build-integration/test/test-serial.h5"
-
 /* ------------------------------------------------------------------ */
 /* the shared expectation                                              */
 /* ------------------------------------------------------------------ */
@@ -1057,8 +1054,9 @@ static void inspect_h5c_file(void)
  * that sees bytes a Fortran compiler actually produced, so it is worth
  * having -- but it is a build artifact of a sibling project, so its absence
  * must not fail the suite. h5fortran's tree is never written to.
+ * H5C_H5FORTRAN_ARTIFACT takes priority over the default compiled in by CMake.
  */
-static void read_h5fortran_artifact(void)
+static int read_h5fortran_artifact(void)
 {
     h5c_file_t         *f = NULL;
     h5c_dataset_info_t  info;
@@ -1069,17 +1067,23 @@ static void read_h5fortran_artifact(void)
                                         H5C_FALSE, H5C_TRUE };
     char               *text = NULL;
     int                 i;
+    const char         *path = getenv("H5C_H5FORTRAN_ARTIFACT");
 
-    st = h5c_open(H5FORTRAN_ARTIFACT, H5C_READ, &f);
+    if (path == NULL) {
+        path = H5C_H5FORTRAN_ARTIFACT_DEFAULT;
+    }
+    st = h5c_open(path, H5C_READ, &f);
     if (st != H5C_OK || f == NULL) {
-        printf("test_crosslang: h5fortran artifact absent, skipping"
-               " (%s)\n", H5FORTRAN_ARTIFACT);
+        printf("\n*** test_crosslang: phase E SKIPPED — h5fortran artifact unavailable ***\n"
+               "  Tried: %s\n"
+               "  Set H5C_H5FORTRAN_ARTIFACT to the absolute path of test-serial.h5\n"
+               "  produced by h5fortran's serial test to enable phase E.\n\n", path);
         if (f != NULL) {
             h5c_close(f);
         }
-        return;
+        return 0;
     }
-    printf("test_crosslang: checking against the h5fortran artifact\n");
+    printf("test_crosslang: phase E checking h5fortran artifact: %s\n", path);
 
     /*
      * h5fortran declares real(real64) :: r64_2d(2,3) holding 1..6. The HDF5
@@ -1140,6 +1144,7 @@ static void read_h5fortran_artifact(void)
     /* The swapped-extent read above is sticky by design. */
     h5c_file_clear_status(f);
     H5C_CHECK(h5c_close(f));
+    return 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1147,6 +1152,7 @@ static void read_h5fortran_artifact(void)
 int main(void)
 {
     h5c_file_t *f = NULL;
+    int phase_e_ran;
 
     H5C_CHECK(h5c_init());
 
@@ -1177,12 +1183,16 @@ int main(void)
     inspect_h5c_file();
 
     /* E: optional, only when h5fortran happens to have been built. */
-    read_h5fortran_artifact();
+    phase_e_ran = read_h5fortran_artifact();
 
     if (g_ref_lcpl != H5I_INVALID_HID) {
         H5Pclose(g_ref_lcpl);
         g_ref_lcpl = H5I_INVALID_HID;
     }
     h5c_finalize();
+    if (!phase_e_ran && h5c_test_failures == 0) {
+        printf("test_crosslang: executed checks passed; phase E SKIPPED (cross-language check not run)\n");
+        return 0;
+    }
     return H5C_TEST_SUMMARY("test_crosslang");
 }
