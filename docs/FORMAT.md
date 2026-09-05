@@ -184,17 +184,28 @@ HDF5 Fortran ライブラリの次元反転により、ファイル上は同じ 
 **`XX, YY, ZZ, XY, YZ, XZ`**とする。これに一致していなければ
 テンソル不変量の計算が壊れる。
 
-この順序は `h5fortran` にも `h5xdmf` にも文書化されていない
-（`model.py` は成分数から型を推定するだけ）。
+`h5fortran/docs/SPEC.md` と `h5xdmf/docs/design.md` も同じ順序を記載している。
+`h5xdmf` は成分を並べ替えず、保存されている列をそのまま参照する。
 
 ## 可視化レイアウト（scheme_version = 1）
 
-`h5c_viz.h` が書く形式。`h5fortran` の `t_phdf5_writer` と同一であり、
+`h5c_viz.h` の `h5c_viz_open()` と `h5c_viz_mpi.h` の `h5c_viz_popen()` が書く形式。`h5fortran` の `t_phdf5_writer` と同一であり、
 Python の `h5xdmf` がどちらの出力からも XDMF3 を生成する。
 
 この形式は serial / parallel のどちらでも書ける。serial では 1 プロセスの
 ローカル数がそのまま total になり、offset は常に 0 である。parallel では
 各 rank のデータを連結するが、ファイル上のレイアウトは同じである。
+
+`h5c::h5c_serial` は `h5c.h` と `h5c_viz.h` の API、並列構成の
+`h5c::h5c_parallel` は `h5c_mpi.h` と `h5c_viz_mpi.h` の API を提供する。
+`h5c::h5c` は構成に応じて serial または serial + parallel を選ぶ互換ターゲットで、
+並列構成では一つの prefix に両 API が入る。Parallel HDF5 を使う構成では serial
+ターゲットも HDF5 経由で MPI に依存する。詳細は [USAGE.md](USAGE.md) を参照。
+
+二つの open が返す `h5c_viz_t` に対して、以後のメッシュ・データ・属性・close 操作は
+すべて `h5c_viz.h` の共通 API を使う。実装は `src/serial/h5c_viz.c` に一つだけ置き、
+`src/h5c_viz_internal.h` の非公開ハンドルとフックを並列側が共有する。
+
 
 ```text
 /                              attrs: scheme_version=1 (i32), time (f64)

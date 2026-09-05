@@ -21,6 +21,7 @@ list(FILTER h5c_serial_tests EXCLUDE REGEX "/test_p[^/]*\\.c$")
 set(h5c_parallel_tests ${h5c_all_tests})
 list(FILTER h5c_parallel_tests INCLUDE REGEX "/test_p[^/]*\\.c$")
 
+# Serial tests, including test_viz, run as quick in both build configurations.
 foreach(src IN LISTS h5c_serial_tests)
     get_filename_component(name "${src}" NAME_WE)
     add_executable(${name} "${src}")

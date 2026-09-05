@@ -10,8 +10,7 @@
  *
  * The file is written, closed, reopened and checked against values recomputed
  * from (rank, index) alone. Offsets are recomputed here with MPI_Allgather,
- * which is NOT how h5c_viz derives them (it uses MPI_Exscan), so the two
- * calculations are independent.
+ * then checked against the stored data.
  *
  * A watchdog alarm bounds the whole program: a collective call that fails to
  * agree across ranks must surface as a FAILURE, never as a hung job.
@@ -28,7 +27,7 @@
 #include <mpi.h>
 
 #include "h5c/h5c_mpi.h"
-#include "h5c/h5c_viz.h"
+#include "h5c/h5c_viz_mpi.h"
 
 H5C_TEST_MAIN_STATE;
 
@@ -62,7 +61,7 @@ typedef struct {
     size_t ptot, ctot;      /* totals over all ranks */
 } layout_t;
 
-/* Prefix sums by MPI_Allgather; h5c_viz uses MPI_Exscan, so this is a check. */
+/* Expected prefix sums for checking offsets and stored data. */
 static void layout_of(size_t np, size_t nc, layout_t *lay)
 {
     long long mine[2];

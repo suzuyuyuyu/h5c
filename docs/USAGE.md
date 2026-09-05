@@ -7,6 +7,34 @@
 `include/h5c/h5c_mpi.h` のコメントが一次資料です。C ライブラリでは利用者が
 必ずヘッダを読むため、そこを厚くしています。
 
+## リンクするターゲットとヘッダー
+
+| ターゲット | 提供する API |
+|---|---|
+| `h5c::h5c_serial` | `h5c.h` の直列 I/O と `h5c_viz.h` の可視化操作 |
+| `h5c::h5c_parallel` | `h5c_mpi.h` の並列 I/O と `h5c_viz_mpi.h` の `h5c_viz_popen()`。直列ターゲットに依存し、並列構成で提供 |
+| `h5c::h5c` | 互換用。直列構成では serial、並列構成では serial + parallel |
+
+```cmake
+find_package(h5c CONFIG REQUIRED)
+target_link_libraries(my_program PRIVATE h5c::h5c_serial)
+```
+
+並列構成の一つのインストールで両 API を使えます。API ごとに prefix を分ける必要は
+ありません。`H5C_HAVE_PARALLEL` は並列ターゲットから伝播する利用可否の目印で、
+公開ヘッダーの宣言は変更しません。ヘッダーはすべて `include/h5c/` 直下です。
+
+各ビルドで使う HDF5 は一つです。並列構成では serial ターゲットも Parallel HDF5
+を使うため、HDF5 経由で MPI に依存します。MPI ラッパーや `MPI_Init()` なしで
+直列 API を利用できますが、**リンクまで完全に MPI 不要にするには、Serial HDF5
+を指定して `H5C_ENABLE_PARALLEL=OFF` で構成してください**。
+
+`h5c.h` は `<hdf5.h>` を include しますが、MPI ヘッダーは読み込みません。
+`hid_t` を自前で宣言せず HDF5 の定義をそのまま使うのは、`hid_t` の実体が
+HDF5 のバージョンによって変わるためです（1.12 より前は `int`）。
+並列 HDF5 の `hdf5.h` は `mpi.h` を引き込みますが、これは HDF5 の
+imported target が include パスを運ぶため、MPI ラッパーなしでも解決します。
+
 ## 初期化
 
 `h5c_init()` は必須ではありません。どの関数も初回呼び出し時に遅延初期化します。
@@ -269,8 +297,8 @@ status の数値は追記のみで、既存の値は変わりません。
 
 ## Parallel I/O
 
-`h5c/h5c_mpi.h` を include します。**このヘッダだけが `mpi.h` を含みます**。
-逐次利用者は `h5c/h5c.h` だけを使い、MPI に一切依存しません。
+`h5c/h5c_mpi.h` を include します。MPI の宣言はこのヘッダーと
+可視化の `h5c/h5c_viz_mpi.h` に分離されています。
 
 ```c
 #include <h5c/h5c_mpi.h>
@@ -382,15 +410,18 @@ h5c_viz_write_cell_data(viz, "SubdomainID", id, H5C_I32, 1);
 h5c_viz_close(viz);
 ```
 
-parallel で collective に書く場合は `h5c/h5c_mpi.h` を include し、
+parallel で collective に書く場合は `h5c/h5c_viz_mpi.h` を include し、
 `h5c_viz_popen()` に communicator と MPI-IO hint を渡します。
 
 ```c
-#include <h5c/h5c_mpi.h>
-#include <h5c/h5c_viz.h>
+#include <h5c/h5c_viz_mpi.h>
 
 h5c_viz_popen("result/seq000000.h5", t, MPI_COMM_WORLD, MPI_INFO_NULL, &viz);
 ```
+
+`h5c_viz_open()` と `h5c_viz_popen()` は同じ `h5c_viz_t` を返します。
+`begin_mesh`、各 write と `_comps`、offsets、status、close、attribute_type は
+すべて `h5c_viz.h` に宣言され、開き方によらず同じ直列側の実装を使います。
 
 座標を x/y/z で別々に持っているなら `h5c_viz_write_nodes_comps()`、field も
 `_comps` 版があります。ソルバー側で詰め替える必要はありません。
@@ -415,7 +446,8 @@ uv run h5xdmf "<dir>/result/seq*.h5" --metadata <dir>/result/metadata.h5 --outdi
 ```
 
 `fluid.xdmf` のように mesh group ごとに出力されます。動く例は
-[`example/visualization/`](../example/visualization/) にあります。
+[`example/serial-viz/`](../example/serial-viz/) と
+[`example/parallel-viz/`](../example/parallel-viz/) にあります。
 レイアウトの詳細は [FORMAT.md](FORMAT.md) を参照してください。
 
 ## テストの実行

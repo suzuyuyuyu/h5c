@@ -33,20 +33,17 @@ endfunction()
 
 h5c_add_example(example_serial      serial/main.c)
 h5c_add_example(example_serial_interleaved interleaved/main.c)
-h5c_add_example(example_serial_visualization visualization/main.c)
+h5c_add_example(example_serial_visualization serial-viz/main.c)
 target_link_libraries(example_serial_visualization PRIVATE m)
 
-# The parallel example needs an h5c built with H5C_ENABLE_PARALLEL=ON, which
-# puts H5C_HAVE_PARALLEL on the target. Checking the target rather than a path
-# works for both an installed h5c and an add_subdirectory() one.
-get_target_property(_h5c_defs h5c::h5c INTERFACE_COMPILE_DEFINITIONS)
-if(_h5c_defs AND "H5C_HAVE_PARALLEL" IN_LIST _h5c_defs)
+# Available both from an installation and add_subdirectory().
+if(TARGET h5c::h5c_parallel)
     find_package(MPI REQUIRED COMPONENTS C)
     h5c_add_example(example_parallel parallel/main.c)
     target_link_libraries(example_parallel PRIVATE MPI::MPI_C)
     h5c_add_example(example_parallel_interleaved parallel-interleaved/main.c)
     target_link_libraries(example_parallel_interleaved PRIVATE MPI::MPI_C)
-    h5c_add_example(example_parallel_visualization visualization/main.c)
+    h5c_add_example(example_parallel_visualization parallel-viz/main.c)
     target_link_libraries(example_parallel_visualization PRIVATE MPI::MPI_C m)
 else()
     message(STATUS "h5c has no parallel support; skipping example_parallel")

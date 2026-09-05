@@ -1,27 +1,6 @@
-/*
- * Visualization HDF5 writer (scheme_version 1).
- *
- * The file layout, what each rank contributes and the collective discipline
- * are documented in include/h5c/h5c_viz.h. h5fortran's
- * docs/USAGE-visualization.md is the format specification and
- * src/parallel/h5fort_parallel_visualization.F90 the reference implementation.
- *
- * WHY THE HELPERS BELOW LOOK LIKE h5c_parallel.c
- * ----------------------------------------------
- * agree(), make_dxpl(), the empty-selection rule and the tile plan are the
- * same devices h5c_parallel.c uses, and they solve the same problems here.
- * They are re-expressed rather than called because they are static to that
- * translation unit AND because the two layers store different things:
- * h5c_pwrite() writes a GROUP holding "data" plus "__partition__", while this
- * writer must produce PLAIN datasets at fixed paths so that h5xdmf and
- * h5fortran read the very same file. What genuinely can be shared is shared:
- * the interleave arithmetic comes from h5c__tile_rows() / h5c__pack_tile()
- * and the attribute code from h5c_attribute.c, through a borrowed
- * h5c_file_t wrapper over this file's id.
- */
 #include "h5c_internal.h"
 
-#include "h5c/h5c_viz.h"
+#include "h5c_viz_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -36,71 +15,15 @@
 /* Number of coordinates per node. The scheme is always three-dimensional. */
 #define NODE_COMPS 3
 
-struct h5c_viz {
-    hid_t        fid;
-    h5c_file_t  *wrap;      /* borrowed wrapper over fid, for the attr code */
-    h5c_status_t sticky;    /* first non-OK status seen on this writer */
-#ifdef H5C_HAVE_PARALLEL
-    MPI_Comm     comm;      /* borrowed from the caller, valid until close */
-#endif
-    int          parallel;
-    int          me;
-    int          nprocs;
 
-    /* --- the ONE current mesh; see close_mesh() ------------------- */
-    int            have_mesh;
-    char          *name;    /* owned */
-    h5c_viz_kind_t kind;
-    int            npe;     /* nodes per element; 1 for POLYDATA */
-    size_t         num_points;
-    size_t         num_cells;
-    size_t         point_offset;
-    size_t         cell_offset;
-    size_t         total_points;
-    size_t         total_cells;
-    hid_t          gid_mesh;
-    hid_t          gid_geom;
-    hid_t          gid_pdata;
-    hid_t          gid_cdata;  /* H5I_INVALID_HID for POLYDATA */
-};
 
 /* ------------------------------------------------------------------ */
 /* collective agreement                                                */
 /* ------------------------------------------------------------------ */
 
-/*
- * Folds every rank's status into one, so that a rank which fails validation
- * cannot return early while the others walk into a collective HDF5 call. The
- * enum is append-only with H5C_OK == 0, so MAX picks a real failure over
- * success. Identical in spirit to agree() in h5c_parallel.c.
- */
 static h5c_status_t agree(const h5c_viz_t *viz, h5c_status_t local)
 {
-#ifdef H5C_HAVE_PARALLEL
-    int mine, worst;
-
-    if (viz->parallel) {
-        mine  = (int)local;
-        worst = mine;
-        if (MPI_Allreduce(&mine, &worst, 1, MPI_INT, MPI_MAX,
-                          viz->comm) != MPI_SUCCESS) {
-            return h5c__fail(H5C_ERR_MPI,
-                             "MPI_Allreduce failed agreeing on status");
-        }
-        if (worst == (int)H5C_OK) {
-            return H5C_OK;
-        }
-        if (local != H5C_OK) {
-            return local; /* keep this rank's own, more specific message */
-        }
-        return h5c__fail((h5c_status_t)worst,
-                         "another rank reported '%s'; failing collectively",
-                         h5c_status_string((h5c_status_t)worst));
-    }
-#else
-    (void)viz;
-#endif
-    return local;
+    return viz->ops ? viz->ops->agree(viz->context, local) : local;
 }
 
 /* Folds `status` into the writer's sticky error and returns it unchanged. */
@@ -172,44 +95,12 @@ static char *mesh_path(const h5c_viz_t *viz, const char *sub, const char *leaf)
 /* dataspaces and transfers                                            */
 /* ------------------------------------------------------------------ */
 
-/* Parallel transfers are collective; serial transfers use H5P_DEFAULT. */
 static hid_t make_dxpl(const h5c_viz_t *viz)
 {
-    hid_t xfer;
-
-#ifdef H5C_HAVE_PARALLEL
-    if (!viz->parallel) {
-        return H5P_DEFAULT;
-    }
-#else
-    (void)viz;
-    return H5P_DEFAULT;
-#endif
-
-    xfer = H5Pcreate(H5P_DATASET_XFER);
-    if (xfer < 0) {
-        h5c__fail_hdf5((long)xfer, "H5Pcreate(H5P_DATASET_XFER) failed");
-        return H5I_INVALID_HID;
-    }
-#ifdef H5C_HAVE_PARALLEL
-    if (H5Pset_dxpl_mpio(xfer, H5FD_MPIO_COLLECTIVE) < 0) {
-        H5Pclose(xfer);
-        h5c__fail_hdf5(-1, "H5Pset_dxpl_mpio failed");
-        return H5I_INVALID_HID;
-    }
-#endif
-    return xfer;
+    return viz->ops ? viz->ops->make_dxpl() : H5P_DEFAULT;
 }
 
-/*
- * Selects file rows [offset, offset + rows) of a (total[, ncols]) dataset and
- * builds a matching contiguous memory space.
- *
- * `rows == 0` selects nothing at all on BOTH spaces rather than a zero-length
- * hyperslab, exactly as select_block() in h5c_parallel.c does: a rank that
- * owns nothing still enters every collective call.
- */
-static h5c_status_t select_rows(hid_t fsid, int drank, size_t offset,
+static h5c_status_t select_rows(const h5c_viz_t *viz, hid_t fsid, int drank, size_t offset,
                                 size_t rows, size_t ncols, hid_t *msid_out)
 {
     hsize_t start[2], count[2], mdims[2];
@@ -217,17 +108,17 @@ static h5c_status_t select_rows(hid_t fsid, int drank, size_t offset,
 
     *msid_out = H5I_INVALID_HID;
 
-    mdims[0] = (rows > 0) ? (hsize_t)rows : 1;
+    mdims[0] = (rows == 0 && viz->ops) ? 1 : (hsize_t)rows;
     mdims[1] = (hsize_t)ncols;
     msid = H5Screate_simple(drank, mdims, NULL);
     if (msid < 0) {
         return h5c__fail_hdf5((long)msid, "cannot build the memory dataspace");
     }
 
-    if (rows == 0) {
-        if (H5Sselect_none(fsid) < 0 || H5Sselect_none(msid) < 0) {
+    if (rows == 0 && viz->ops) {
+        if (viz->ops->select_none(fsid, msid) != H5C_OK) {
             H5Sclose(msid);
-            return h5c__fail_hdf5(-1, "H5Sselect_none failed");
+            return H5C_ERR_HDF5;
         }
     } else {
         start[0] = (hsize_t)offset;
@@ -312,18 +203,18 @@ static h5c_status_t write_block(const h5c_viz_t *viz, hid_t gid,
     }
     xfer = make_dxpl(viz);
     if (xfer == H5I_INVALID_HID) {
-        H5Dclose(did);
-        H5Sclose(fsid);
-        return H5C_ERR_HDF5;
+        st = H5C_ERR_HDF5;
+    } else {
+        st = select_rows(viz, fsid, drank, offset, rows, ncols, &msid);
     }
-    if ((st = select_rows(fsid, drank, offset, rows, ncols, &msid)) == H5C_OK) {
+    if ((st = agree(viz, st)) == H5C_OK) {
         if (H5Dwrite(did, h5c__mem_type(type), msid, fsid, xfer,
                      (buf != NULL) ? buf : (const void *)&dummy) < 0) {
             st = h5c__fail_hdf5(-1, "H5Dwrite failed for '%s'", name);
         }
-        H5Sclose(msid);
     }
-    if (xfer != H5P_DEFAULT) { H5Pclose(xfer); }
+    if (msid >= 0) { H5Sclose(msid); }
+    if (xfer >= 0 && xfer != H5P_DEFAULT) { H5Pclose(xfer); }
     H5Dclose(did);
     H5Sclose(fsid);
     return st;
@@ -413,39 +304,12 @@ static void stage_conn(char *dst, size_t row0, size_t rows, const void *ctx)
     }
 }
 
-/*
- * The tile count must be IDENTICAL on every rank: local row counts differ, so
- * a locally derived count would make ranks issue different numbers of
- * collective transfers and deadlock. Ranks that run out of rows early still
- * enter every call, with an empty selection. Same device as agree_tiles() in
- * h5c_parallel.c; the floor of 1 keeps one transfer when no rank owns rows.
- */
 static h5c_status_t agree_tiles(const h5c_viz_t *viz, size_t n, size_t rows,
                                 long long *ntiles)
 {
-    long long mine;
-#ifdef H5C_HAVE_PARALLEL
-    long long most;
-#endif
-
-    mine = (rows > 0) ? (long long)((n + rows - 1) / rows) : 0;
-#ifdef H5C_HAVE_PARALLEL
-    if (viz->parallel) {
-        most = mine;
-        if (MPI_Allreduce(&mine, &most, 1, MPI_LONG_LONG, MPI_MAX,
-                          viz->comm) != MPI_SUCCESS) {
-            *ntiles = 1;
-            return h5c__fail(H5C_ERR_MPI,
-                             "MPI_Allreduce failed agreeing on the tile count");
-        }
-        *ntiles = (most < 1) ? 1 : most;
-        return H5C_OK;
-    }
-#else
-    (void)viz;
-#endif
+    long long mine = (rows > 0) ? (long long)((n + rows - 1) / rows) : 0;
     *ntiles = (mine < 1) ? 1 : mine;
-    return H5C_OK;
+    return viz->ops ? viz->ops->agree_tiles(viz->context, ntiles) : H5C_OK;
 }
 
 /*
@@ -518,11 +382,13 @@ static h5c_status_t write_staged(const h5c_viz_t *viz, hid_t gid,
         if (rows > 0 && row0 < rows_local) {
             take = (rows_local - row0 < rows) ? rows_local - row0 : rows;
         }
-        if (select_rows(fsid, drank, offset + row0, take, ncols,
-                        &msid) != H5C_OK) {
-            /* Unreachable in practice; nothing is left to select. */
+        h5c_status_t selected = select_rows(viz, fsid, drank, offset + row0,
+                                             take, ncols, &msid);
+        selected = agree(viz, selected);
+        if (selected != H5C_OK) {
+            if (msid >= 0) { H5Sclose(msid); }
             if (st == H5C_OK) {
-                st = H5C_ERR_HDF5;
+                st = selected;
             }
             break;
         }
@@ -565,135 +431,69 @@ const char *h5c_viz_attribute_type(size_t ncomp)
 /* lifecycle                                                           */
 /* ------------------------------------------------------------------ */
 
-static h5c_status_t viz_open_impl(const char *path, double time, int parallel,
-#ifdef H5C_HAVE_PARALLEL
-                                  MPI_Comm comm, MPI_Info info,
-#endif
-                                  h5c_viz_t **out)
+h5c_status_t h5c__viz_open(const char *path, double time, hid_t fapl,
+                           const h5c_viz_ops *ops, void *context,
+                           h5c_viz_t **out)
 {
-    h5c_status_t st;
-    h5c_viz_t   *viz;
-    hid_t        fapl, fid;
-    int32_t      scheme = (int32_t)H5C_SCHEME_VERSION;
+    h5c_status_t st = H5C_OK;
+    h5c_viz_t *viz = NULL;
+    int32_t scheme = (int32_t)H5C_SCHEME_VERSION;
 
     if (out == NULL) {
-        return h5c__fail(H5C_ERR_INVALID_ARG, "h5c_viz_open: out is NULL");
+        st = h5c__fail(H5C_ERR_INVALID_ARG, "h5c_viz_open: out is NULL");
+    } else {
+        *out = NULL;
     }
-    *out = NULL;
-    if (path == NULL || path[0] == '\0') {
-        return h5c__fail(H5C_ERR_INVALID_ARG, "h5c_viz_open: empty path");
+    if (st == H5C_OK && (path == NULL || path[0] == '\0')) {
+        st = h5c__fail(H5C_ERR_INVALID_ARG, "h5c_viz_open: empty path");
     }
-#ifdef H5C_HAVE_PARALLEL
-    if (parallel && comm == MPI_COMM_NULL) {
-        return h5c__fail(H5C_ERR_INVALID_ARG, "h5c_viz_popen: MPI_COMM_NULL");
+    if (st == H5C_OK) {
+        st = h5c__ensure_init();
     }
-#else
-    (void)parallel;
-#endif
-    if ((st = h5c__ensure_init()) != H5C_OK) {
+    if (st == H5C_OK) {
+        viz = (h5c_viz_t *)calloc(1, sizeof *viz);
+        if (viz == NULL) {
+            st = h5c__fail(H5C_ERR_NOMEM, "h5c_viz_open: allocation failed");
+        }
+    }
+    if (ops) { st = ops->agree(context, st); }
+    if (st != H5C_OK) {
+        free(viz);
+        free(context);
         return st;
     }
-
-    fapl = H5P_DEFAULT;
-#ifdef H5C_HAVE_PARALLEL
-    if (parallel) {
-        fapl = H5Pcreate(H5P_FILE_ACCESS);
-        if (fapl < 0) {
-            return h5c__fail_hdf5((long)fapl,
-                                  "H5Pcreate(H5P_FILE_ACCESS) failed");
-        }
-        /*
-         * DELIBERATE, and copied from h5fortran: no collective metadata
-         * properties. Every rank writes every attribute symmetrically instead,
-         * which is what keeps the metadata consistent; mixing rank-0-only
-         * attribute writes with collective metadata operations corrupts the
-         * metadata checksums.
-         */
-        if (H5Pset_fapl_mpio(fapl, comm, info) < 0) {
-            H5Pclose(fapl);
-            return h5c__fail_hdf5(-1, "H5Pset_fapl_mpio failed for '%s'", path);
-        }
-    }
-#endif
-    fid = H5Fcreate(path, H5F_ACC_TRUNC, H5P_DEFAULT, fapl);
-    if (fapl != H5P_DEFAULT) {
-        H5Pclose(fapl);
-    }
-    if (fid < 0) {
-        return h5c__fail_hdf5((long)fid, "cannot create '%s'", path);
-    }
-
-    viz = (h5c_viz_t *)calloc(1, sizeof *viz);
-    if (viz == NULL) {
-        H5Fclose(fid);
-        return h5c__fail(H5C_ERR_NOMEM, "h5c_viz_open: allocation failed");
-    }
-    viz->fid       = fid;
-    viz->sticky    = H5C_OK;
-    viz->parallel  = parallel;
-#ifdef H5C_HAVE_PARALLEL
-    viz->comm      = comm;   /* borrowed; valid until h5c_viz_close() */
-#endif
+    viz->ops       = ops;
+    viz->context   = context;
     viz->gid_mesh  = H5I_INVALID_HID;
     viz->gid_geom  = H5I_INVALID_HID;
     viz->gid_pdata = H5I_INVALID_HID;
     viz->gid_cdata = H5I_INVALID_HID;
-
-    /* The wrapper is borrowed: closing it never closes `fid`. */
-    if ((st = h5c_file_from_hid(fid, &viz->wrap)) != H5C_OK) {
-        H5Fclose(fid);
-        free(viz);
-        return st;
+    viz->fid = H5Fcreate(path, H5F_ACC_TRUNC, H5P_DEFAULT, fapl);
+    if (viz->fid < 0) {
+        st = h5c__fail_hdf5((long)viz->fid, "cannot create '%s'", path);
+    } else {
+        st = h5c_file_from_hid(viz->fid, &viz->wrap);
     }
-#ifdef H5C_HAVE_PARALLEL
-    if (parallel) {
-        if (MPI_Comm_rank(comm, &viz->me) != MPI_SUCCESS ||
-            MPI_Comm_size(comm, &viz->nprocs) != MPI_SUCCESS) {
-            h5c_close(viz->wrap);
-            H5Fclose(fid);
-            free(viz);
-            return h5c__fail(H5C_ERR_MPI, "MPI_Comm_rank/size failed");
+    if ((st = agree(viz, st)) == H5C_OK) {
+        st = h5c_write_attr_scalar(viz->wrap, "/", "scheme_version",
+                                   &scheme, H5C_I32);
+        if (st == H5C_OK) {
+            st = h5c_write_attr_scalar(viz->wrap, "/", "time", &time, H5C_F64);
         }
-    } else
-#endif
-    {
-        viz->me = 0;
-        viz->nprocs = 1;
+        st = agree(viz, st);
     }
-
-    /* Root metadata, written by every rank so that all ranks agree. */
-    st = h5c_write_attr_scalar(viz->wrap, "/", "scheme_version",
-                               &scheme, H5C_I32);
-    if (st == H5C_OK) {
-        st = h5c_write_attr_scalar(viz->wrap, "/", "time", &time, H5C_F64);
-    }
-    if ((st = agree(viz, st)) != H5C_OK) {
-        h5c_close(viz->wrap);
-        H5Fclose(fid);
-        free(viz);
+    if (st != H5C_OK) {
+        h5c_viz_close(viz);
         return st;
     }
-
     *out = viz;
     return H5C_OK;
 }
 
 h5c_status_t h5c_viz_open(const char *path, double time, h5c_viz_t **out)
 {
-#ifdef H5C_HAVE_PARALLEL
-    return viz_open_impl(path, time, 0, MPI_COMM_NULL, MPI_INFO_NULL, out);
-#else
-    return viz_open_impl(path, time, 0, out);
-#endif
+    return h5c__viz_open(path, time, H5P_DEFAULT, NULL, NULL, out);
 }
-
-#ifdef H5C_HAVE_PARALLEL
-h5c_status_t h5c_viz_popen(const char *path, double time, MPI_Comm comm,
-                           MPI_Info info, h5c_viz_t **out)
-{
-    return viz_open_impl(path, time, 1, comm, info, out);
-}
-#endif
 
 /* Releases the current mesh's group ids. Leaves no dangling id behind. */
 static void close_mesh(h5c_viz_t *viz)
@@ -730,6 +530,7 @@ h5c_status_t h5c_viz_close(h5c_viz_t *viz)
     if (viz->wrap != NULL) {
         h5c_close(viz->wrap);  /* borrowed wrapper; frees only the wrapper */
     }
+    free(viz->context);
     free(viz);
     return st;
 }
@@ -772,58 +573,15 @@ static h5c_status_t open_or_create_group(hid_t loc, const char *name,
     return H5C_OK;
 }
 
-/*
- * Derives this rank's offsets and the totals from the local counts.
- *
- * DELIBERATE: h5fortran MPI_Allgathers both counts and then sums the ranks
- * below its own. The prefix sum over the ranks in order is exactly what
- * MPI_Exscan computes, and MPI_Allreduce the totals, so the same numbers come
- * out of two allocation-free calls. That matters here beyond tidiness: a
- * calloc for nprocs entries could fail on one rank only, and a rank that
- * skipped the gather while the others entered it would hang.
- *
- * Point and cell offsets are independent: both are carried in one pair.
- */
 static h5c_status_t gather_counts(h5c_viz_t *viz, size_t np, size_t nc)
 {
-#ifdef H5C_HAVE_PARALLEL
-    int64_t mine[2], before[2], total[2];
-
-    if (!viz->parallel) {
-        viz->point_offset = 0;
-        viz->cell_offset  = 0;
-        viz->total_points = np;
-        viz->total_cells  = nc;
-        return H5C_OK;
+    if (viz->ops) {
+        return viz->ops->gather_counts(viz->context, viz, np, nc);
     }
-
-    mine[0]   = (int64_t)np;
-    mine[1]   = (int64_t)nc;
-    before[0] = 0;
-    before[1] = 0;  /* MPI_Exscan leaves rank 0's result undefined */
-
-    if (MPI_Exscan(mine, before, 2, MPI_INT64_T, MPI_SUM,
-                   viz->comm) != MPI_SUCCESS ||
-        MPI_Allreduce(mine, total, 2, MPI_INT64_T, MPI_SUM,
-                      viz->comm) != MPI_SUCCESS) {
-        return h5c__fail(H5C_ERR_MPI,
-                         "MPI_Exscan/Allreduce failed collecting the counts");
-    }
-    if (viz->me == 0) {
-        before[0] = 0;
-        before[1] = 0;
-    }
-
-    viz->point_offset = (size_t)before[0];
-    viz->cell_offset  = (size_t)before[1];
-    viz->total_points = (size_t)total[0];
-    viz->total_cells  = (size_t)total[1];
-#else
     viz->point_offset = 0;
     viz->cell_offset  = 0;
     viz->total_points = np;
     viz->total_cells  = nc;
-#endif
     return H5C_OK;
 }
 
@@ -851,7 +609,7 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
      */
     close_mesh(viz);
 
-    /* --- local validation, agreed before any HDF5 or MPI call ------ */
+    /* --- local validation, agreed before any HDF5 call ------ */
     st = H5C_OK;
     name     = H5C_VIZ_DEFAULT_UGRID_NAME;
     topology = H5C_VIZ_DEFAULT_TOPOLOGY;
@@ -1188,7 +946,7 @@ static h5c_status_t write_field_attr(h5c_viz_t *viz, const char *group,
  * then `buf` is the caller's buffer).
  *
  * The flag is what decides, NOT `comps != NULL`: a NULL array must be
- * rejected on viz->comm like any other bad argument, and a rank that guessed
+ * rejected on the writer communicator like any other bad argument, and a rank that guessed
  * the path from the pointer would take a different branch from its peers.
  */
 static h5c_status_t write_field(h5c_viz_t *viz, int cell_data,

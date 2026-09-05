@@ -142,16 +142,7 @@ void h5c_file_clear_status(h5c_file_t *file)
 
 int h5c_is_parallel(const h5c_file_t *file)
 {
-    /*
-     * Deliberately lives here rather than in h5c_parallel.c: h5c.h must stay
-     * usable without <mpi.h>, and a serial build has no parallel state at all.
-     */
-#ifdef H5C_HAVE_PARALLEL
     return (file != NULL && file->parallel) ? 1 : 0;
-#else
-    (void)file;
-    return 0;
-#endif
 }
 
 hid_t h5c_file_hid(const h5c_file_t *file)

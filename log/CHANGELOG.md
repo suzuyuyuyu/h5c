@@ -7,6 +7,8 @@
 
 ### 追加
 
+- serial / parallel を別ターゲットに分離し、一つのインストールで両 API を提供。可視化実装は共有し、並列 open の宣言を `h5c_viz_mpi.h` に分離。
+
 **可視化 writer の serial 対応（breaking change）**
 
 - `h5c_viz_open(path, time, &out)` を MPI なしで利用できるようにした。

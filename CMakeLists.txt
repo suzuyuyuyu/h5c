@@ -44,24 +44,24 @@ endif()
 # library
 # ---------------------------------------------------------------------
 
-set(h5c_sources
-    src/h5c_error.c
-    src/h5c_type.c
-    src/h5c_file.c
-    src/h5c_dataset.c
-    src/h5c_string.c
-    src/h5c_attribute.c
-    src/h5c_interleaved.c
-    src/h5c_viz.c
+set(h5c_serial_sources
+    src/serial/h5c_error.c
+    src/serial/h5c_type.c
+    src/serial/h5c_file.c
+    src/serial/h5c_dataset.c
+    src/serial/h5c_string.c
+    src/serial/h5c_attribute.c
+    src/serial/h5c_interleaved.c
+    src/serial/h5c_viz.c
 )
-if(H5C_ENABLE_PARALLEL)
-    list(APPEND h5c_sources src/h5c_parallel.c)
-endif()
-
-add_library(h5c ${h5c_sources})
+add_library(h5c_serial ${h5c_serial_sources})
+add_library(h5c::h5c_serial ALIAS h5c_serial)
+add_library(h5c INTERFACE)
 add_library(h5c::h5c ALIAS h5c)
+target_link_libraries(h5c INTERFACE h5c_serial)
+set(h5c_install_targets h5c h5c_serial)
 
-target_include_directories(h5c
+target_include_directories(h5c_serial
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
@@ -72,21 +72,32 @@ target_include_directories(h5c
 
 # HDF5 requirements are carried on the target so dependents inherit them.
 if(TARGET HDF5::HDF5)
-    target_link_libraries(h5c PUBLIC HDF5::HDF5)
+    target_link_libraries(h5c_serial PUBLIC HDF5::HDF5)
 else()
-    target_include_directories(h5c PUBLIC ${HDF5_C_INCLUDE_DIRS})
-    target_link_libraries(h5c PUBLIC ${HDF5_C_LIBRARIES})
+    target_include_directories(h5c_serial PUBLIC ${HDF5_C_INCLUDE_DIRS})
+    target_link_libraries(h5c_serial PUBLIC ${HDF5_C_LIBRARIES})
 endif()
 
 if(H5C_ENABLE_PARALLEL)
-    target_link_libraries(h5c PUBLIC MPI::MPI_C)
-    target_compile_definitions(h5c PUBLIC H5C_HAVE_PARALLEL)
+    add_library(h5c_parallel src/parallel/parallel.c src/parallel/viz_mpi.c)
+    add_library(h5c::h5c_parallel ALIAS h5c_parallel)
+    target_include_directories(h5c_parallel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(h5c_parallel PUBLIC h5c_serial MPI::MPI_C)
+    target_compile_definitions(h5c_parallel PUBLIC H5C_HAVE_PARALLEL)
+    target_link_libraries(h5c INTERFACE h5c_parallel)
+    list(APPEND h5c_install_targets h5c_parallel)
 endif()
 
-set_target_properties(h5c PROPERTIES
+set_target_properties(h5c_serial PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
 )
+if(H5C_ENABLE_PARALLEL)
+    set_target_properties(h5c_parallel PROPERTIES
+        VERSION ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+    )
+endif()
 
 # ---------------------------------------------------------------------
 # tests
@@ -100,7 +111,7 @@ endif()
 # install / export
 # ---------------------------------------------------------------------
 
-install(TARGETS h5c
+install(TARGETS ${h5c_install_targets}
     EXPORT h5cTargets
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}

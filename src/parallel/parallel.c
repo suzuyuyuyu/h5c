@@ -15,6 +15,17 @@
 /* Name of the payload dataset inside the group written for a path. */
 #define DATA_NAME "data"
 
+typedef struct {
+    h5c_file_t base;
+    MPI_Comm comm;
+    int collective;
+} parallel_file;
+
+static parallel_file *pfile(const h5c_file_t *file)
+{
+    return (parallel_file *)file;
+}
+
 /* ------------------------------------------------------------------ */
 /* collective agreement                                                */
 /* ------------------------------------------------------------------ */
@@ -146,7 +157,7 @@ static hid_t make_dxpl(const h5c_file_t *file)
         h5c__fail_hdf5((long)xfer, "H5Pcreate(H5P_DATASET_XFER) failed");
         return H5I_INVALID_HID;
     }
-    if (H5Pset_dxpl_mpio(xfer, file->collective ? H5FD_MPIO_COLLECTIVE
+    if (H5Pset_dxpl_mpio(xfer, pfile(file)->collective ? H5FD_MPIO_COLLECTIVE
                                                 : H5FD_MPIO_INDEPENDENT) < 0) {
         H5Pclose(xfer);
         h5c__fail_hdf5(-1, "H5Pset_dxpl_mpio failed");
@@ -400,7 +411,7 @@ h5c_status_t h5c_popen_comm(const char *path, h5c_mode_t mode,
                               path, (int)mode);
     }
 
-    file = (h5c_file_t *)calloc(1, sizeof *file);
+    file = (h5c_file_t *)calloc(1, sizeof(parallel_file));
     if (file == NULL) {
         H5Fclose(fid);
         return h5c__fail(H5C_ERR_NOMEM, "h5c_popen: allocation failed");
@@ -410,8 +421,8 @@ h5c_status_t h5c_popen_comm(const char *path, h5c_mode_t mode,
     file->borrowed   = 0;
     file->readonly   = (mode == H5C_READ);
     file->parallel   = 1;
-    file->collective = 1;  /* h5c never changes this implicitly */
-    file->comm       = comm;  /* borrowed; valid until h5c_close() */
+    pfile(file)->collective = 1;  /* h5c never changes this implicitly */
+    pfile(file)->comm       = comm;  /* borrowed; valid until h5c_close() */
 
     *out = file;
     return H5C_OK;
@@ -429,7 +440,7 @@ h5c_status_t h5c_pset_collective(h5c_file_t *file, int collective)
     if ((st = pfile_check(file)) != H5C_OK) {
         return h5c__record(file, st);
     }
-    file->collective = collective ? 1 : 0;
+    pfile(file)->collective = collective ? 1 : 0;
     return H5C_OK;
 }
 
@@ -438,7 +449,7 @@ int h5c_pis_collective(const h5c_file_t *file)
     if (file == NULL || !file->parallel) {
         return 0;
     }
-    return file->collective;
+    return pfile(file)->collective;
 }
 
 MPI_Comm h5c_pcomm(const h5c_file_t *file)
@@ -446,7 +457,7 @@ MPI_Comm h5c_pcomm(const h5c_file_t *file)
     if (file == NULL || !file->parallel) {
         return MPI_COMM_NULL;
     }
-    return file->comm;
+    return pfile(file)->comm;
 }
 
 /* ------------------------------------------------------------------ */
@@ -606,7 +617,7 @@ static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
         /* No usable communicator, so nothing can be agreed. */
         return pfile_check(file);
     }
-    comm = file->comm;
+    comm = pfile(file)->comm;
 
     /* --- local validation, agreed before any HDF5 call ------------- */
     st = pcheck_args(file, path, rank, dims);
@@ -791,7 +802,7 @@ static h5c_status_t open_for_read(h5c_file_t *file, const char *path,
     }
 
     /* Agree BEFORE the caller enters the collective transfer. */
-    st = agree(file->comm, st);
+    st = agree(pfile(file)->comm, st);
     if (st != H5C_OK) {
         if (did >= 0) { H5Dclose(did); }
         if (gid >= 0) { H5Gclose(gid); }
@@ -825,7 +836,7 @@ static h5c_status_t pread_impl(h5c_file_t *file, const char *path, void *buf,
     if (file == NULL || !file->parallel) {
         return pfile_check(file);
     }
-    comm = file->comm;
+    comm = pfile(file)->comm;
 
     st = pcheck_args(file, path, rank, dims);
     if (st == H5C_OK && unpack == NULL && buf == NULL && dims[0] > 0) {
@@ -931,6 +942,111 @@ h5c_status_t h5c_pread(h5c_file_t *file, const char *path, void *buf,
                                        NULL));
 }
 
+static h5c_status_t pread_rows_impl(h5c_file_t *file, const char *path,
+                                    void *buf, h5c_type_t type, int rank,
+                                    const size_t *dims, size_t row_offset)
+{
+    h5c_status_t       st;
+    h5c_dataset_info_t info;
+    MPI_Comm           comm;
+    hid_t              mtype = H5I_INVALID_HID;
+    hid_t              did = H5I_INVALID_HID, fsid = H5I_INVALID_HID;
+    hid_t              msid = H5I_INVALID_HID, xfer = H5I_INVALID_HID;
+    int                i;
+    char               dummy = 0;
+
+    if ((st = h5c__ensure_init()) != H5C_OK) {
+        return st;
+    }
+    if (file == NULL || !file->parallel) {
+        return pfile_check(file);
+    }
+    comm = pfile(file)->comm;
+    st = pcheck_args(file, path, rank, dims);
+    if (st == H5C_OK && buf == NULL && dims[0] > 0) {
+        st = h5c__fail(H5C_ERR_INVALID_ARG, "buffer is NULL for '%s'", path);
+    }
+    if (st == H5C_OK) {
+        mtype = h5c__mem_type_read(type);
+        if (mtype == H5I_INVALID_HID) {
+            st = h5c__fail(H5C_ERR_INVALID_ARG,
+                           "type %d has no numeric mapping "
+                           "(parallel string I/O is not supported)",
+                           (int)type);
+        }
+    }
+    if ((st = agree(comm, st)) != H5C_OK) {
+        return st;
+    }
+    if ((st = agree_shape(comm, path, rank, dims)) != H5C_OK) {
+        return st;
+    }
+
+    did = H5Dopen2(file->fid, path, H5P_DEFAULT);
+    if (did < 0) {
+        st = h5c__fail(H5C_ERR_NOT_FOUND, "no dataset at '%s'", path);
+    }
+    if (st == H5C_OK) {
+        st = h5c__info_from_dset(did, &info);
+    }
+    if (st == H5C_OK && info.rank != rank) {
+        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
+                       "'%s' has rank %d, expected %d", path, info.rank, rank);
+    }
+    if (st == H5C_OK) {
+        for (i = 1; i < rank; i++) {
+            if (info.dims[i] != dims[i]) {
+                st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
+                               "'%s' dims[%d] is %lu, expected %lu", path, i,
+                               (unsigned long)info.dims[i],
+                               (unsigned long)dims[i]);
+                break;
+            }
+        }
+    }
+    if (st == H5C_OK &&
+        (row_offset > info.dims[0] || dims[0] > info.dims[0] - row_offset)) {
+        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
+                       "'%s' has %lu rows; requested [%lu, %lu)", path,
+                       (unsigned long)info.dims[0], (unsigned long)row_offset,
+                       (unsigned long)(row_offset + dims[0]));
+    }
+    if ((st = agree(comm, st)) != H5C_OK) {
+        goto done;
+    }
+
+    xfer = make_dxpl(file);
+    if (xfer == H5I_INVALID_HID) {
+        st = H5C_ERR_HDF5;
+        goto done;
+    }
+    fsid = H5Dget_space(did);
+    if (fsid < 0) {
+        st = h5c__fail_hdf5((long)fsid, "H5Dget_space failed for '%s'", path);
+        goto done;
+    }
+    if ((st = select_block(fsid, rank, dims, row_offset, &msid)) == H5C_OK &&
+        H5Dread(did, mtype, msid, fsid, xfer,
+                (buf != NULL) ? buf : (void *)&dummy) < 0) {
+        st = h5c__fail_hdf5(-1, "H5Dread failed for '%s'", path);
+    }
+
+done:
+    if (msid >= 0) { H5Sclose(msid); }
+    if (fsid >= 0) { H5Sclose(fsid); }
+    if (xfer >= 0) { H5Pclose(xfer); }
+    if (did  >= 0) { H5Dclose(did);  }
+    return st;
+}
+
+h5c_status_t h5c_pread_rows(h5c_file_t *file, const char *path, void *buf,
+                            h5c_type_t type, int rank, const size_t *dims,
+                            size_t row_offset)
+{
+    return h5c__record(file, pread_rows_impl(file, path, buf, type, rank,
+                                             dims, row_offset));
+}
+
 /* ------------------------------------------------------------------ */
 /* shape query                                                         */
 /* ------------------------------------------------------------------ */
@@ -953,7 +1069,7 @@ static h5c_status_t pinfo_impl(h5c_file_t *file, const char *path,
     if (file == NULL || !file->parallel) {
         return pfile_check(file);
     }
-    comm = file->comm;
+    comm = pfile(file)->comm;
 
     st = h5c__check_common(file, path, 0, NULL);
     if (st == H5C_OK && local == NULL && global == NULL) {
@@ -1039,7 +1155,7 @@ static h5c_status_t players_impl(h5c_file_t *file, const char *path,
     if (file == NULL || !file->parallel) {
         return pfile_check(file);
     }
-    comm = file->comm;
+    comm = pfile(file)->comm;
 
     st = h5c__check_common(file, path, 0, NULL);
     if (st == H5C_OK) {
@@ -1149,7 +1265,7 @@ static h5c_status_t ppartition_impl(h5c_file_t *file, const char *path,
      * capacity is wrong on one rank only should still see one shared verdict.
      * No collective HDF5 call follows, so this is the last chance to agree.
      */
-    return agree(file->comm, st);
+    return agree(pfile(file)->comm, st);
 }
 
 h5c_status_t h5c_ppartition(h5c_file_t *file, const char *path,
@@ -1206,7 +1322,7 @@ h5c_status_t h5c_pwrite_interleaved(h5c_file_t *file, const char *path,
     if (file == NULL || !file->parallel) {
         return h5c__record(file, pfile_check(file));
     }
-    comm = file->comm;
+    comm = pfile(file)->comm;
 
     memset(&plan, 0, sizeof plan);
     st = pcheck_comps(comps, ncomp, n, type, &plan.esize);
@@ -1263,7 +1379,7 @@ h5c_status_t h5c_pread_interleaved(h5c_file_t *file, const char *path,
     if (file == NULL || !file->parallel) {
         return h5c__record(file, pfile_check(file));
     }
-    comm = file->comm;
+    comm = pfile(file)->comm;
 
     memset(&plan, 0, sizeof plan);
     st = pcheck_comps((const void *const *)comps, ncomp, n, type, &plan.esize);

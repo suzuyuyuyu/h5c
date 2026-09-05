@@ -8,6 +8,7 @@
 #define H5C_TEST_H
 
 #include <stdio.h>
+#include <hdf5.h>
 
 #include "h5c/h5c.h"
 

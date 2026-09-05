@@ -40,9 +40,8 @@ preset を継承して足します。テンプレートが `misc/` にありま�
 ビルドディレクトリは `build/<preset 名>` に分かれるので、`.gitignore` は
 `build/` の 1 行で済みます。
 
-Parallel は既定で OFF です。有効にすると `mpi.h` に依存する API が
-`h5c/h5c_mpi.h` として現れます。Serial API は常に有効で、切り離す必要が
-ないためオプションはありません。
+Parallel は既定で OFF です。有効にすると並列 API も同じインストールに含まれます。
+Serial API は常に有効です。
 
 preset を使わない場合は従来どおり指定できます。
 
@@ -56,6 +55,18 @@ cmake -S . -B build/manual -DHDF5_ROOT=/path/to/hdf5
 find_package(h5c CONFIG REQUIRED)
 target_link_libraries(my_program PRIVATE h5c::h5c)
 ```
+
+- `h5c::h5c_serial`: `h5c.h` の直列 I/O と `h5c_viz.h` の共通可視化 API。
+- `h5c::h5c_parallel`: 並列構成で提供。serial に依存し、`h5c_mpi.h` と
+  `h5c_viz_mpi.h`（`h5c_viz_popen()`）の並列 API を追加。
+- `h5c::h5c`: 互換ターゲット。直列構成では serial、並列構成では両方をリンク。
+
+API ごとの二つの prefix は不要です。HDF5 は各ビルドで一つだけ使います。
+並列構成の serial ターゲットは Parallel HDF5 経由で MPI に依存するため、
+完全に MPI 不要なリンクには Serial HDF5 + `H5C_ENABLE_PARALLEL=OFF` を使ってください。
+`h5c.h` / `h5c_viz.h` 自体は MPI ヘッダーなしで使えます。HDF5 生 API の利用時は
+`<hdf5.h>` を明示的に include します。
+
 
 ## 使い方
 

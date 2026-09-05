@@ -3,7 +3,7 @@
  * scattered back into, `ncomp` separate component arrays of `n` elements.
  *
  * WRITING PACKS, READING STRIDES (see docs/h5c-h5cpp-design.md):
- * a strided collective write makes MPI-IO fill file blocks only partially and
+ * a strided collective write makes the file driver fill file blocks only partially and
  * forces read-modify-write, so writes gather into a contiguous staging buffer
  * and issue contiguous hyperslab writes. Reads carry no such penalty, so
  * h5c_read_component() selects a strided hyperslab and moves 1/ncomp of the

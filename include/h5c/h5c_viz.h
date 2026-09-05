@@ -50,9 +50,6 @@
 #define H5C_VIZ_H
 
 #include "h5c/h5c.h"
-#ifdef H5C_HAVE_PARALLEL
-#  include "h5c/h5c_mpi.h"
-#endif
 #include "h5c/h5c_version.h"
 
 #ifdef __cplusplus
@@ -108,12 +105,6 @@ typedef struct h5c_viz_mesh {
  */
 h5c_status_t h5c_viz_open(const char *path, double time,
                           h5c_viz_t **out);
-
-#ifdef H5C_HAVE_PARALLEL
-/* Parallel, collective over `comm`. */
-h5c_status_t h5c_viz_popen(const char *path, double time,
-                           MPI_Comm comm, MPI_Info info, h5c_viz_t **out);
-#endif
 
 /*
  * Closes the file and frees the handle, which is invalid afterwards either

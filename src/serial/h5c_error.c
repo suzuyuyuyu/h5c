@@ -10,20 +10,9 @@ static int g_initialised = 0;
 
 const char *h5c_status_string(h5c_status_t status)
 {
-    switch (status) {
-    case H5C_OK:                 return "ok";
-    case H5C_ERR_INVALID_ARG:    return "invalid argument";
-    case H5C_ERR_NOT_FOUND:      return "not found";
-    case H5C_ERR_SHAPE_MISMATCH: return "shape mismatch";
-    case H5C_ERR_TYPE_MISMATCH:  return "type mismatch";
-    case H5C_ERR_EXISTS:         return "already exists";
-    case H5C_ERR_HDF5:           return "HDF5 error";
-    case H5C_ERR_MPI:            return "MPI error";
-    case H5C_ERR_NOMEM:          return "out of memory";
-    case H5C_ERR_STATE:          return "invalid state";
-    case H5C_ERR_UNSUPPORTED:    return "unsupported";
-    default:                     return "unknown status";
-    }
+    static const char *const messages[] = H5C_STATUS_MESSAGES;
+    return (unsigned)status < sizeof messages / sizeof messages[0]
+        ? messages[status] : "unknown status";
 }
 
 const h5c_error_t *h5c_last_error(void)

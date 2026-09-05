@@ -9,7 +9,8 @@
 | `interleaved/` | 成分ごとの配列をベクトル場として保存する | `example_serial_interleaved` |
 | `parallel/` | 分散読み書きと `__partition__` | `example_parallel` |
 | `parallel-interleaved/` | 分散されたベクトル場（成分別配列 + 領域分割） | `example_parallel_interleaved` |
-| `visualization/` | ParaView 向け時系列。XDMF 生成まで通す | `example_parallel_visualization` |
+| `serial-viz/` | 直列で ParaView 向け時系列を書く | `example_serial_visualization` |
+| `parallel-viz/` | 並列で同じ可視化レイアウトを書く | `example_parallel_visualization` |
 
 ## ビルド
 
@@ -27,12 +28,12 @@ cmake --build example/build/intel --target examples
 `add_subdirectory` して一緒にビルドする。新規 clone でもそのまま動く。
 
 `parallel/` は `H5C_ENABLE_PARALLEL=ON` でビルドした `h5c` を指したときだけ
-作られる。target 上の `H5C_HAVE_PARALLEL` を見て判断しているので、
+作られる。`h5c::h5c_parallel` ターゲットの有無で判断しているので、
 インストール済みでもソースツリーからでも同じように働く。
 
 ```sh
 cmake -S example -B example/build/intel-mpi \
-      -DCMAKE_PREFIX_PATH="$HOME/.local/opt/intel/h5c-mpi-0.1.0" \
+      -DCMAKE_PREFIX_PATH="$HOME/.local/opt/intel/h5c-0.1.0" \
       -DCMAKE_C_COMPILER=mpiicx
 cmake --build example/build/intel-mpi --target examples
 ```
@@ -111,7 +112,10 @@ as stored: 1000 2000 3000 1001 2001 3001 1002 2002 3002 2000 4000 6000 ...
 
 ## 可視化まで通す
 
-`visualization/` は 5 ステップの時系列を書く。四面体 mesh（圧力波と渦速度）と
+`example_serial_visualization` は両構成で直列実行できます。実行前に作業ディレクトリに
+`mkdir -p result` で出力先を作ります。並列版の実行は以下のバッチ経由だけです。
+
+`serial-viz/` と `parallel-viz/` は同じレイアウトで 5 ステップの時系列を書く。四面体 mesh（圧力波と渦速度）と
 粒子群（沈降）の 2 mesh を 1 ファイルに入れる。
 
 ```sh

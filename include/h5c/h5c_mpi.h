@@ -1,9 +1,9 @@
 /*
  * h5c — parallel (MPI) I/O.
  *
- * This header is the ONLY place h5c exposes <mpi.h>. Serial users include
- * h5c/h5c.h and never pull in MPI. It exists only when the library was built
- * with H5C_ENABLE_PARALLEL=ON, which also defines H5C_HAVE_PARALLEL.
+ * This header and h5c_viz_mpi.h expose <mpi.h>. Serial users include h5c.h
+ * and h5c_viz.h without MPI headers. The parallel implementation is built
+ * with H5C_ENABLE_PARALLEL=ON; h5c_parallel defines H5C_HAVE_PARALLEL.
  *
  * ---------------------------------------------------------------------------
  * Storage layout (identical to h5fortran, see docs/FORMAT.md)
@@ -100,6 +100,17 @@ h5c_status_t h5c_pwrite(h5c_file_t *file, const char *path, const void *buf,
  */
 h5c_status_t h5c_pread(h5c_file_t *file, const char *path, void *buf,
                        h5c_type_t type, int rank, const size_t *dims);
+
+/*
+ * Reads rows [row_offset, row_offset + dims[0]) from an ordinary dataset.
+ * Unlike h5c_pread(), `path` names the dataset itself and no stored
+ * __partition__ is required, so callers may choose a new decomposition for
+ * every run. All ranks call collectively; row offsets and dims[0] may differ,
+ * while rank and dims[1..] must agree.
+ */
+h5c_status_t h5c_pread_rows(h5c_file_t *file, const char *path, void *buf,
+                            h5c_type_t type, int rank, const size_t *dims,
+                            size_t row_offset);
 
 /*
  * Shape of a distributed dataset. `local` reports this rank's block as

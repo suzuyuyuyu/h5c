@@ -1,5 +1,5 @@
 /*
- * Parallel round-trip tests. Run under mpiexec with 2 ranks by ctest -L quick.
+ * Parallel round-trip tests. Submit the mpi-labelled CTest through a job script.
  *
  * Shapes, local extents and values are deliberately ASYMMETRIC: local extents
  * differ between ranks, the non-split dimension is 3, and every element

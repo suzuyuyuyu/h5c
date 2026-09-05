@@ -4,9 +4,7 @@
 
 #include "h5c/h5c.h"
 
-#ifdef H5C_HAVE_PARALLEL
-#  include <mpi.h>
-#endif
+#include <hdf5.h>
 
 #include <stdio.h>
 
@@ -27,12 +25,22 @@ struct h5c_file {
     h5c_status_t sticky;   /* first non-OK status seen on this file */
     int          borrowed; /* 1 when fid is owned by the caller */
     int          readonly;
-#ifdef H5C_HAVE_PARALLEL
-    int          parallel;   /* 1 when opened through the h5c_mpi.h entry points */
-    int          collective; /* transfer mode; 1 (collective) by default */
-    MPI_Comm     comm;       /* borrowed from the caller, valid until close */
-#endif
+    int          parallel;
 };
+
+#define H5C_STATUS_MESSAGES { \
+    [H5C_OK] = "ok", \
+    [H5C_ERR_INVALID_ARG] = "invalid argument", \
+    [H5C_ERR_NOT_FOUND] = "not found", \
+    [H5C_ERR_SHAPE_MISMATCH] = "shape mismatch", \
+    [H5C_ERR_TYPE_MISMATCH] = "type mismatch", \
+    [H5C_ERR_EXISTS] = "already exists", \
+    [H5C_ERR_HDF5] = "HDF5 error", \
+    [H5C_ERR_MPI] = "MPI error", \
+    [H5C_ERR_NOMEM] = "out of memory", \
+    [H5C_ERR_STATE] = "invalid state", \
+    [H5C_ERR_UNSUPPORTED] = "unsupported", \
+}
 
 /* --- error plumbing ------------------------------------------------ */
 
