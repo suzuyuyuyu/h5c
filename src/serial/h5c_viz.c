@@ -15,12 +15,6 @@
 /* Number of coordinates per node. The scheme is always three-dimensional. */
 #define NODE_COMPS 3
 
-
-
-/* ------------------------------------------------------------------ */
-/* collective agreement                                                */
-/* ------------------------------------------------------------------ */
-
 static h5c_status_t agree(const h5c_viz_t *viz, h5c_status_t local)
 {
     return viz->ops ? viz->ops->agree(viz->context, local) : local;
@@ -55,10 +49,6 @@ static h5c_status_t mesh_check(const h5c_viz_t *viz)
     return H5C_OK;
 }
 
-/* ------------------------------------------------------------------ */
-/* paths                                                               */
-/* ------------------------------------------------------------------ */
-
 /*
  * Builds "/<mesh>[/<sub>[/<leaf>]]" for the attribute calls, which address
  * objects by path. Returns NULL on allocation failure; the caller frees.
@@ -90,10 +80,6 @@ static char *mesh_path(const h5c_viz_t *viz, const char *sub, const char *leaf)
     }
     return p;
 }
-
-/* ------------------------------------------------------------------ */
-/* dataspaces and transfers                                            */
-/* ------------------------------------------------------------------ */
 
 static hid_t make_dxpl(const h5c_viz_t *viz)
 {
@@ -219,10 +205,6 @@ static h5c_status_t write_block(const h5c_viz_t *viz, hid_t gid,
     H5Sclose(fsid);
     return st;
 }
-
-/* ------------------------------------------------------------------ */
-/* staged (row-tiled) writes                                           */
-/* ------------------------------------------------------------------ */
 
 /*
  * Rows that are not contiguous in the caller's memory are staged tile by
@@ -412,10 +394,6 @@ static h5c_status_t write_staged(const h5c_viz_t *viz, hid_t gid,
     return agree(viz, st);
 }
 
-/* ------------------------------------------------------------------ */
-/* attribute_type                                                      */
-/* ------------------------------------------------------------------ */
-
 const char *h5c_viz_attribute_type(size_t ncomp)
 {
     switch (ncomp) {
@@ -426,10 +404,6 @@ const char *h5c_viz_attribute_type(size_t ncomp)
     default: return NULL;
     }
 }
-
-/* ------------------------------------------------------------------ */
-/* lifecycle                                                           */
-/* ------------------------------------------------------------------ */
 
 h5c_status_t h5c__viz_open(const char *path, double time, hid_t fapl,
                            const h5c_viz_ops *ops, void *context,
@@ -540,10 +514,6 @@ h5c_status_t h5c_viz_status(const h5c_viz_t *viz)
     return (viz == NULL) ? H5C_ERR_INVALID_ARG : viz->sticky;
 }
 
-/* ------------------------------------------------------------------ */
-/* meshes                                                              */
-/* ------------------------------------------------------------------ */
-
 /* Opens <loc>/<name>, creating it when absent. */
 static h5c_status_t open_or_create_group(hid_t loc, const char *name,
                                          hid_t *out)
@@ -609,7 +579,7 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
      */
     close_mesh(viz);
 
-    /* --- local validation, agreed before any HDF5 call ------ */
+    /* local validation, agreed before any HDF5 call */
     st = H5C_OK;
     name     = H5C_VIZ_DEFAULT_UGRID_NAME;
     topology = H5C_VIZ_DEFAULT_TOPOLOGY;
@@ -676,7 +646,7 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
         return record(viz, st);
     }
 
-    /* --- groups, collective ---------------------------------------- */
+    /* groups, collective */
     {
         htri_t present = H5Lexists(viz->fid, viz->name, H5P_DEFAULT);
 
@@ -747,10 +717,6 @@ h5c_status_t h5c_viz_offsets(const h5c_viz_t *viz,
     }
     return H5C_OK;
 }
-
-/* ------------------------------------------------------------------ */
-/* geometry                                                            */
-/* ------------------------------------------------------------------ */
 
 /* Shared entry checks for every write call below. */
 static h5c_status_t begin_write(h5c_viz_t *viz)
@@ -915,10 +881,6 @@ h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
                       (size_t)viz->npe, stage_conn, &ctx);
     return record(viz, st);
 }
-
-/* ------------------------------------------------------------------ */
-/* fields                                                              */
-/* ------------------------------------------------------------------ */
 
 /* Stamps attribute_type on a field, for the component counts XDMF names. */
 static h5c_status_t write_field_attr(h5c_viz_t *viz, const char *group,

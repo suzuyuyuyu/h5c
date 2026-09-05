@@ -42,8 +42,6 @@ struct h5c_file {
     [H5C_ERR_UNSUPPORTED] = "unsupported", \
 }
 
-/* --- error plumbing ------------------------------------------------ */
-
 /* Records `status` with a printf-style message and returns `status`. */
 h5c_status_t h5c__fail(h5c_status_t status, const char *fmt, ...);
 
@@ -55,8 +53,6 @@ h5c_status_t h5c__record(h5c_file_t *file, h5c_status_t status);
 
 /* Ensures the library is initialised. Safe to call repeatedly. */
 h5c_status_t h5c__ensure_init(void);
-
-/* --- datatype mapping ---------------------------------------------- */
 
 /*
  * File and memory datatypes for `type`. Both are BORROWED: they belong to h5c
@@ -87,12 +83,10 @@ h5c_type_t h5c__type_from_hid(hid_t tid);
 /* Releases the cached datatypes. Called by h5c_finalize(). */
 void h5c__type_cleanup(void);
 
-/* --- shared helpers ------------------------------------------------ */
-
 /* Link creation property list that creates intermediate groups. */
 hid_t h5c__lcpl(void);
 
-/* --- dataset helpers, shared with the other translation units ------ */
+/* dataset helpers, shared with the other translation units */
 
 /* Validates a file handle, path, rank and dims. */
 h5c_status_t h5c__check_common(h5c_file_t *file, const char *path,
@@ -110,8 +104,6 @@ h5c_status_t h5c__info_from_dset(hid_t did, h5c_dataset_info_t *out);
 /* Compares a stored shape against rank/dims, reporting a useful message. */
 h5c_status_t h5c__shape_equals(const h5c_dataset_info_t *info,
                                const char *path, int rank, const size_t *dims);
-
-/* --- interleave buffer arithmetic ----------------------------------- */
 
 /*
  * The buffer-level half of the interleaved API, implemented once in

@@ -90,8 +90,6 @@ static void check_partition(h5c_file_t *f, const char *path, size_t nlocal)
     free(got);
 }
 
-/* ------------------------------------------------------------------ */
-
 static void test_plain_rows(h5c_file_t *f)
 {
     const size_t total = 5u * (size_t)g_nprocs;

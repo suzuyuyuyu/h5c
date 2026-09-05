@@ -26,10 +26,6 @@ static parallel_file *pfile(const h5c_file_t *file)
     return (parallel_file *)file;
 }
 
-/* ------------------------------------------------------------------ */
-/* collective agreement                                                */
-/* ------------------------------------------------------------------ */
-
 /*
  * DELIBERATE: h5fortran lets a rank that fails validation return early while
  * the others walk into a collective HDF5 call, which deadlocks. Every status
@@ -212,10 +208,6 @@ static h5c_status_t select_block(hid_t fsid, int rank, const size_t *dims,
     return H5C_OK;
 }
 
-/* ------------------------------------------------------------------ */
-/* interleave tiling plan                                              */
-/* ------------------------------------------------------------------ */
-
 /*
  * Row-wise tiling for the interleaved entry points. The transfer loop below
  * is shared by pwrite_impl() and pread_impl(); the buffer arithmetic itself
@@ -354,10 +346,6 @@ static h5c_status_t transfer_tiles(hid_t did, hid_t fsid, hid_t mtype,
     return st;
 }
 
-/* ------------------------------------------------------------------ */
-/* open / mode                                                         */
-/* ------------------------------------------------------------------ */
-
 h5c_status_t h5c_popen_comm(const char *path, h5c_mode_t mode,
                             MPI_Comm comm, MPI_Info info, h5c_file_t **out)
 {
@@ -459,10 +447,6 @@ MPI_Comm h5c_pcomm(const h5c_file_t *file)
     }
     return pfile(file)->comm;
 }
-
-/* ------------------------------------------------------------------ */
-/* partition dataset                                                   */
-/* ------------------------------------------------------------------ */
 
 /*
  * Writes __partition__ collectively, matching h5fortran's split: rank 0
@@ -582,10 +566,6 @@ static h5c_status_t read_partition(hid_t gid, int nprocs, int64_t *part,
     return H5C_OK;
 }
 
-/* ------------------------------------------------------------------ */
-/* write                                                               */
-/* ------------------------------------------------------------------ */
-
 /*
  * Writes this rank's block. With `pack == NULL` the caller's contiguous `buf`
  * is written in one collective transfer; with a plan, the data is gathered
@@ -619,7 +599,7 @@ static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
     }
     comm = pfile(file)->comm;
 
-    /* --- local validation, agreed before any HDF5 call ------------- */
+    /* local validation, agreed before any HDF5 call */
     st = pcheck_args(file, path, rank, dims);
     if (st == H5C_OK && pack == NULL && buf == NULL && dims[0] > 0) {
         st = h5c__fail(H5C_ERR_INVALID_ARG, "buffer is NULL for '%s'", path);
@@ -652,7 +632,6 @@ static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
         return agree(comm, h5c__fail(H5C_ERR_MPI, "MPI_Comm_rank/size failed"));
     }
 
-    /* --- partition from the local extents -------------------------- */
     part = (int64_t *)calloc((size_t)nprocs + 1, sizeof *part);
     if (part == NULL) {
         return agree(comm, h5c__fail(H5C_ERR_NOMEM,
@@ -670,7 +649,6 @@ static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
     }
     offset = (size_t)part[me];
 
-    /* --- group, replacing an existing one only when asked ---------- */
     existed = h5c_exists(file, path);
     if (existed && (flags & H5C_WRITE_REPLACE)) {
         if (H5Ldelete(file->fid, path, H5P_DEFAULT) < 0) {
@@ -700,7 +678,6 @@ static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
         return H5C_ERR_HDF5;
     }
 
-    /* --- data ------------------------------------------------------ */
     fdims[0] = (hsize_t)part[nprocs];
     for (i = 1; i < rank; i++) {
         fdims[i] = (hsize_t)dims[i];
@@ -751,10 +728,6 @@ h5c_status_t h5c_pwrite(h5c_file_t *file, const char *path, const void *buf,
     return h5c__record(file, pwrite_impl(file, path, buf, type, rank, dims,
                                         flags, NULL));
 }
-
-/* ------------------------------------------------------------------ */
-/* read                                                                */
-/* ------------------------------------------------------------------ */
 
 /*
  * Opens path/data, reads and validates __partition__, and reports this rank's
@@ -1047,10 +1020,6 @@ h5c_status_t h5c_pread_rows(h5c_file_t *file, const char *path, void *buf,
                                              dims, row_offset));
 }
 
-/* ------------------------------------------------------------------ */
-/* shape query                                                         */
-/* ------------------------------------------------------------------ */
-
 static h5c_status_t pinfo_impl(h5c_file_t *file, const char *path,
                                h5c_dataset_info_t *local,
                                h5c_dataset_info_t *global)
@@ -1119,10 +1088,6 @@ h5c_status_t h5c_pdataset_info(h5c_file_t *file, const char *path,
 {
     return h5c__record(file, pinfo_impl(file, path, local, global));
 }
-
-/* ------------------------------------------------------------------ */
-/* layout accessors                                                    */
-/* ------------------------------------------------------------------ */
 
 /*
  * Reads and validates __partition__, then hands the caller the whole boundary
@@ -1274,10 +1239,6 @@ h5c_status_t h5c_ppartition(h5c_file_t *file, const char *path,
     return h5c__record(file,
                        ppartition_impl(file, path, bounds, capacity, count));
 }
-
-/* ------------------------------------------------------------------ */
-/* interleaved multi-component fields                                  */
-/* ------------------------------------------------------------------ */
 
 /* Local checks shared by the two interleaved entry points. */
 static h5c_status_t pcheck_comps(const void *const *comps, size_t ncomp,

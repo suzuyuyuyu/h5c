@@ -3,10 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ------------------------------------------------------------------ */
-/* helpers                                                             */
-/* ------------------------------------------------------------------ */
-
 h5c_status_t h5c__check_common(h5c_file_t *file, const char *path,
                                  int rank, const size_t *dims)
 {
@@ -142,10 +138,6 @@ int h5c_exists(h5c_file_t *file, const char *path)
     return (r > 0) ? 1 : 0;
 }
 
-/* ------------------------------------------------------------------ */
-/* write                                                               */
-/* ------------------------------------------------------------------ */
-
 static h5c_status_t write_impl(h5c_file_t *file, const char *path,
                                const void *buf, h5c_type_t type,
                                int rank, const size_t *dims, unsigned flags)
@@ -235,10 +227,6 @@ h5c_status_t h5c_write(h5c_file_t *file, const char *path, const void *buf,
     return h5c__record(file, write_impl(file, path, buf, type, rank, dims, flags));
 }
 
-/* ------------------------------------------------------------------ */
-/* read                                                                */
-/* ------------------------------------------------------------------ */
-
 static h5c_status_t read_impl(h5c_file_t *file, const char *path, void *buf,
                               h5c_type_t type, int rank, const size_t *dims)
 {
@@ -290,10 +278,6 @@ h5c_status_t h5c_read(h5c_file_t *file, const char *path, void *buf,
 {
     return h5c__record(file, read_impl(file, path, buf, type, rank, dims));
 }
-
-/* ------------------------------------------------------------------ */
-/* metadata and allocating read                                        */
-/* ------------------------------------------------------------------ */
 
 static h5c_status_t info_impl(h5c_file_t *file, const char *path,
                               h5c_dataset_info_t *out)

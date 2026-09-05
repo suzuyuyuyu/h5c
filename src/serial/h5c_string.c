@@ -16,9 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ------------------------------------------------------------------ */
-/* shared helpers (also used by h5c_attribute.c)                       */
-/* ------------------------------------------------------------------ */
+/* shared helpers (also used by h5c_attribute.c) */
 
 /*
  * Declared here rather than in h5c_internal.h because that header is shared
@@ -200,10 +198,6 @@ done:
     }
     return st;
 }
-
-/* ------------------------------------------------------------------ */
-/* write                                                               */
-/* ------------------------------------------------------------------ */
 
 static h5c_status_t check_write(h5c_file_t *file, const char *path,
                                 const char *value)
@@ -398,10 +392,6 @@ h5c_status_t h5c_write_string_vlen(h5c_file_t *file, const char *path,
 {
     return h5c__record(file, write_vlen_impl(file, path, value, flags));
 }
-
-/* ------------------------------------------------------------------ */
-/* read                                                                */
-/* ------------------------------------------------------------------ */
 
 static h5c_status_t read_string_impl(h5c_file_t *file, const char *path,
                                      char **out)

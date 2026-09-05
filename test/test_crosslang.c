@@ -32,10 +32,6 @@ H5C_TEST_MAIN_STATE;
 #define REF_PATH "test_crosslang_ref.h5"   /* written by the bare HDF5 API */
 #define H5C_PATH "test_crosslang_h5c.h5"   /* written by h5c               */
 
-/* ------------------------------------------------------------------ */
-/* the shared expectation                                              */
-/* ------------------------------------------------------------------ */
-
 /*
  * The canonical case from docs/FORMAT.md: a Fortran a(2,3) holding 1..6 is
  * stored as dataspace {3, 2} with the flat byte sequence 1 2 3 4 5 6.
@@ -82,9 +78,7 @@ static int host_is_le(void)
     return b[0] == 1u;
 }
 
-/* ------------------------------------------------------------------ */
-/* bare-HDF5 helpers (no h5c call in this section)                     */
-/* ------------------------------------------------------------------ */
+/* bare-HDF5 helpers (no h5c call in this section) */
 
 static hid_t g_ref_lcpl = H5I_INVALID_HID;
 
@@ -364,10 +358,6 @@ static void ref_check_bytes(hid_t fid, const char *path,
     H5Dclose(did);
 }
 
-/* ------------------------------------------------------------------ */
-/* phase A: the reference writer                                       */
-/* ------------------------------------------------------------------ */
-
 static void build_reference_file(void)
 {
     hid_t   fid;
@@ -444,9 +434,7 @@ static void build_reference_file(void)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* phase B: h5c reads what the reference writer produced               */
-/* ------------------------------------------------------------------ */
+/* phase B: h5c reads what the reference writer produced */
 
 /*
  * KNOWN GAP, measured here rather than assumed.
@@ -693,10 +681,6 @@ static void read_reference_attr(h5c_file_t *f)
                "integer attribute did not convert to h5c bool values");
 }
 
-/* ------------------------------------------------------------------ */
-/* phase C: h5c writes                                                 */
-/* ------------------------------------------------------------------ */
-
 static void write_with_h5c(void)
 {
     h5c_file_t *f = NULL;
@@ -770,9 +754,7 @@ static void write_with_h5c(void)
     H5C_CHECK(h5c_close(f));
 }
 
-/* ------------------------------------------------------------------ */
-/* phase D: the reference reader inspects what h5c wrote               */
-/* ------------------------------------------------------------------ */
+/* phase D: the reference reader inspects what h5c wrote */
 
 static void inspect_h5c_bool(hid_t fid)
 {
@@ -1045,10 +1027,6 @@ static void inspect_h5c_file(void)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* phase E: the real h5fortran artifact, when it happens to be there   */
-/* ------------------------------------------------------------------ */
-
 /*
  * h5fortran's own test output, read with h5c. This is the only check here
  * that sees bytes a Fortran compiler actually produced, so it is worth
@@ -1146,8 +1124,6 @@ static int read_h5fortran_artifact(void)
     H5C_CHECK(h5c_close(f));
     return 1;
 }
-
-/* ------------------------------------------------------------------ */
 
 int main(void)
 {

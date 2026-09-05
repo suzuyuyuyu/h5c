@@ -5,9 +5,7 @@
  * h5fortran's t_phdf5_writer produces, so the same Python tooling turns either
  * into XDMF3. No XML is generated here.
  *
- * ---------------------------------------------------------------------------
  * File layout
- * ---------------------------------------------------------------------------
  *
  *   /                              attrs: scheme_version=1, time=<f64>
  *   /<mesh>/                       attrs: topology_type, nodes_per_element
@@ -23,9 +21,7 @@
  * Several meshes may live in one file: call h5c_viz_begin_mesh() again with a
  * different name. h5xdmf emits one .xdmf per mesh group.
  *
- * ---------------------------------------------------------------------------
  * What each rank contributes
- * ---------------------------------------------------------------------------
  *
  * num_cells is the number of cells this rank OWNS; ghost cells must not be
  * written or they appear twice. num_points covers every local node those
@@ -37,9 +33,7 @@
  * own nodes. The writer adds this rank's node offset to produce file-global
  * ids, so the caller needs no communication to number its nodes.
  *
- * ---------------------------------------------------------------------------
  * Collective discipline
- * ---------------------------------------------------------------------------
  *
  * In serial mode, calls are local. In parallel mode, every function here is
  * collective over the file's communicator: all ranks must call it, in the
@@ -92,10 +86,6 @@ typedef struct h5c_viz_mesh {
     size_t num_cells;              /* THIS rank's owned cells; 0 for POLYDATA */
 } h5c_viz_mesh_t;
 
-/* ------------------------------------------------------------------ */
-/* lifecycle                                                           */
-/* ------------------------------------------------------------------ */
-
 /*
  * Creates `path`, truncating it, and stamps the root attributes
  * scheme_version = H5C_SCHEME_VERSION and time = `time`.
@@ -116,10 +106,6 @@ h5c_status_t h5c_viz_close(h5c_viz_t *viz);
 /* First non-OK status recorded on this writer, or H5C_OK. */
 h5c_status_t h5c_viz_status(const h5c_viz_t *viz);
 
-/* ------------------------------------------------------------------ */
-/* meshes                                                              */
-/* ------------------------------------------------------------------ */
-
 /*
  * Starts (or re-selects) a mesh and makes it the target of the write calls
  * below. Creates the group, its geometry/point_data/cell_data subgroups and
@@ -133,10 +119,6 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh);
 /* This rank's offsets within the current mesh, once begin_mesh has run. */
 h5c_status_t h5c_viz_offsets(const h5c_viz_t *viz,
                              size_t *point_offset, size_t *cell_offset);
-
-/* ------------------------------------------------------------------ */
-/* geometry                                                            */
-/* ------------------------------------------------------------------ */
 
 /*
  * Node coordinates, written to <mesh>/geometry/nodes as (total_points, 3).
@@ -166,10 +148,6 @@ h5c_status_t h5c_viz_write_nodes_comps(h5c_viz_t *viz,
  */
 h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
                                         h5c_type_t type);
-
-/* ------------------------------------------------------------------ */
-/* fields                                                              */
-/* ------------------------------------------------------------------ */
 
 /*
  * Point and cell fields, written to <mesh>/point_data/<name> and

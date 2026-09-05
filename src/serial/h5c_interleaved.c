@@ -18,10 +18,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ------------------------------------------------------------------ */
-/* pack limit                                                          */
-/* ------------------------------------------------------------------ */
-
 /*
  * Process-wide, deliberately a plain static: it is a tuning knob set once at
  * start-up, not per-call state. Concurrent set/get from several threads is not
@@ -44,10 +40,6 @@ size_t h5c_pack_limit(void)
 {
     return g_pack_limit;
 }
-
-/* ------------------------------------------------------------------ */
-/* helpers                                                             */
-/* ------------------------------------------------------------------ */
 
 /*
  * Buffer-level helpers, declared in h5c_internal.h and shared with the
@@ -183,10 +175,6 @@ static hid_t tile_memspace(size_t rows, size_t ncomp)
     mdims[1] = (hsize_t)ncomp;
     return H5Screate_simple(2, mdims, NULL);
 }
-
-/* ------------------------------------------------------------------ */
-/* write                                                               */
-/* ------------------------------------------------------------------ */
 
 /* Opens or creates the [n, ncomp] dataset, honouring H5C_WRITE_REPLACE. */
 static h5c_status_t open_for_write(h5c_file_t *file, const char *path,
@@ -331,10 +319,6 @@ h5c_status_t h5c_write_interleaved(h5c_file_t *file, const char *path,
                                                     n, type, flags));
 }
 
-/* ------------------------------------------------------------------ */
-/* read                                                                */
-/* ------------------------------------------------------------------ */
-
 static h5c_status_t read_interleaved_impl(h5c_file_t *file, const char *path,
                                           void *const *comps, size_t ncomp,
                                           size_t n, h5c_type_t type)
@@ -420,10 +404,6 @@ h5c_status_t h5c_read_interleaved(h5c_file_t *file, const char *path,
     return h5c__record(file, read_interleaved_impl(file, path, comps, ncomp,
                                                    n, type));
 }
-
-/* ------------------------------------------------------------------ */
-/* single component                                                    */
-/* ------------------------------------------------------------------ */
 
 static h5c_status_t read_component_impl(h5c_file_t *file, const char *path,
                                         void *buf, size_t comp, size_t n,

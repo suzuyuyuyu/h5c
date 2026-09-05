@@ -21,10 +21,6 @@ char        *h5c__str_pad_buffer(const char *value, size_t *len_out);
 h5c_status_t h5c__str_read_id(hid_t id, int is_attr, const char *what,
                               char **out);
 
-/* ------------------------------------------------------------------ */
-/* helpers                                                             */
-/* ------------------------------------------------------------------ */
-
 static h5c_status_t check_args(h5c_file_t *file, const char *obj_path,
                                const char *name)
 {
@@ -99,10 +95,6 @@ static h5c_status_t open_attr(hid_t oid, const char *obj_path,
     *out = aid;
     return H5C_OK;
 }
-
-/* ------------------------------------------------------------------ */
-/* string attributes                                                   */
-/* ------------------------------------------------------------------ */
 
 static h5c_status_t write_str_impl(h5c_file_t *file, const char *obj_path,
                                    const char *name, const char *value)
@@ -215,10 +207,6 @@ h5c_status_t h5c_read_attr_str(h5c_file_t *file, const char *obj_path,
 {
     return h5c__record(file, read_str_impl(file, obj_path, name, out));
 }
-
-/* ------------------------------------------------------------------ */
-/* scalar numeric attributes                                           */
-/* ------------------------------------------------------------------ */
 
 static h5c_status_t write_numeric_impl(h5c_file_t *file, const char *obj_path,
                                        const char *name, const void *values,
@@ -448,10 +436,6 @@ h5c_status_t h5c_attr_length(h5c_file_t *file, const char *obj_path,
     return h5c__record(file,
                        attr_length_impl(file, obj_path, name, count));
 }
-
-/* ------------------------------------------------------------------ */
-/* existence                                                           */
-/* ------------------------------------------------------------------ */
 
 /* Like h5c_exists(), this is a query: it never touches the sticky status. */
 int h5c_attr_exists(h5c_file_t *file, const char *obj_path, const char *name)

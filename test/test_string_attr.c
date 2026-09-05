@@ -44,8 +44,6 @@ static void expect_attr(h5c_file_t *f, const char *obj, const char *name,
     h5c_free_string(got);
 }
 
-/* ------------------------------------------------------------------ */
-
 static void test_fixed_strings(h5c_file_t *f)
 {
     h5c_dataset_info_t info;

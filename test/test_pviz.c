@@ -51,9 +51,7 @@ static void on_watchdog(int sig)
     _exit(2);
 }
 
-/* ------------------------------------------------------------------ */
-/* the decomposition, recomputed independently of h5c                  */
-/* ------------------------------------------------------------------ */
+/* the decomposition, recomputed independently of h5c */
 
 typedef struct {
     size_t np, nc;          /* this rank's counts    */
@@ -88,9 +86,7 @@ static void layout_of(size_t np, size_t nc, layout_t *lay)
     free(all);
 }
 
-/* ------------------------------------------------------------------ */
-/* value generators: pure functions of (rank, index, component)        */
-/* ------------------------------------------------------------------ */
+/* value generators: pure functions of (rank, index, component) */
 
 /* Three decades apart, so a transposed (3, n) write is unmistakable. */
 static double node_c(int comp, int r, size_t i)
@@ -137,10 +133,6 @@ static size_t conn_local(size_t c, size_t k, size_t np)
 {
     return (c + k) % np;
 }
-
-/* ------------------------------------------------------------------ */
-/* read-back helpers                                                   */
-/* ------------------------------------------------------------------ */
 
 static void check_shape(h5c_file_t *f, const char *path, int rank,
                         size_t d0, size_t d1)
@@ -207,9 +199,7 @@ static double *read_f64_rows(h5c_file_t *f, const char *path, size_t rows,
     return buf;
 }
 
-/* ------------------------------------------------------------------ */
-/* mesh 1: unstructured, unequal per-rank point and cell counts         */
-/* ------------------------------------------------------------------ */
+/* mesh 1: unstructured, unequal per-rank point and cell counts */
 
 #define FLUID_NPE 4
 
@@ -239,7 +229,6 @@ static void write_fluid(h5c_viz_t *viz)
     H5C_ASSERT_EQ_SIZE(poff, g_fluid.poff, "fluid point offset");
     H5C_ASSERT_EQ_SIZE(coff, g_fluid.coff, "fluid cell offset");
 
-    /* --- geometry: interleaved nodes, i32 connectivity ------------- */
     nodes = (double *)malloc(g_fluid.np * 3 * sizeof *nodes);
     for (i = 0; i < g_fluid.np; i++) {
         nodes[3 * i + 0] = node_c(0, g_me, i);
@@ -269,7 +258,6 @@ static void write_fluid(h5c_viz_t *viz)
     }
     free(conn);
 
-    /* --- point data: scalar, vector (comps), 6-tensor (buffer) ----- */
     pressure = (double *)malloc(g_fluid.np * sizeof *pressure);
     for (i = 0; i < g_fluid.np; i++) {
         pressure[i] = pressure_of(g_me, i);
@@ -299,7 +287,6 @@ static void write_fluid(h5c_viz_t *viz)
     H5C_CHECK(h5c_viz_write_point_data(viz, "Stress", stress, H5C_F64, 6));
     free(stress);
 
-    /* --- cell data: scalar, vector (comps), 6-tensor (buffer) ------ */
     subdom = (int32_t *)malloc((g_fluid.nc > 0 ? g_fluid.nc : 1)
                                * sizeof *subdom);
     for (c = 0; c < g_fluid.nc; c++) {
@@ -411,7 +398,6 @@ static void check_fluid(h5c_file_t *f)
     }
     free(conn);
 
-    /* --- point fields ------------------------------------------------ */
     pressure = read_f64_rows(f, "/fluid/point_data/Pressure", g_fluid.ptot, 1);
     if (pressure != NULL) {
         for (i = 0; i < g_fluid.np; i++) {
@@ -454,7 +440,6 @@ static void check_fluid(h5c_file_t *f)
         free(stress);
     }
 
-    /* --- cell fields ------------------------------------------------- */
     dims[0] = g_fluid.ctot;
     subdom = (int32_t *)malloc((g_fluid.ctot > 0 ? g_fluid.ctot : 1)
                                * sizeof *subdom);
@@ -503,9 +488,7 @@ static void check_fluid(h5c_file_t *f)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* mesh 2: polydata in the same file as the unstructured one            */
-/* ------------------------------------------------------------------ */
+/* mesh 2: polydata in the same file as the unstructured one */
 
 static layout_t g_dust;
 
@@ -586,9 +569,7 @@ static void check_dust(h5c_file_t *f)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* mesh 3: rank 0 owns zero points and zero cells                      */
-/* ------------------------------------------------------------------ */
+/* mesh 3: rank 0 owns zero points and zero cells */
 
 #define SPARSE_NPE 3
 
@@ -727,9 +708,7 @@ static void check_sparse(h5c_file_t *f)
     }
 }
 
-/* ------------------------------------------------------------------ */
-/* connectivity in every supported integer width                       */
-/* ------------------------------------------------------------------ */
+/* connectivity in every supported integer width */
 
 /*
  * i8 has to survive the offset addition, so the meshes here stay small
@@ -846,9 +825,7 @@ static void check_narrow(h5c_file_t *f, const narrow_case_t *nc)
     free(conn);
 }
 
-/* ------------------------------------------------------------------ */
-/* rejected arguments, agreed across ranks                             */
-/* ------------------------------------------------------------------ */
+/* rejected arguments, agreed across ranks */
 
 /* Asserts that every rank returned the same status. */
 static void check_agreed(h5c_status_t st, const char *what)
@@ -1020,10 +997,6 @@ static void check_bad_args(h5c_file_t *f)
                "a point cloud must have no cell_data group");
 }
 
-/* ------------------------------------------------------------------ */
-/* attribute_type mapping                                              */
-/* ------------------------------------------------------------------ */
-
 static void test_attribute_type(void)
 {
     const char *got;
@@ -1043,8 +1016,6 @@ static void test_attribute_type(void)
     got = h5c_viz_attribute_type(4);
     H5C_ASSERT(got == NULL, "ncomp 4 mapped to '%s'", got != NULL ? got : "");
 }
-
-/* ------------------------------------------------------------------ */
 
 static void check_root(h5c_file_t *f)
 {

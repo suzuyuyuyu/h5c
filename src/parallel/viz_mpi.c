@@ -50,26 +50,21 @@ static h5c_status_t gather_counts(const void *context, h5c_viz_t *viz,
 {
     const viz_context *ctx = context;
     int64_t mine[2] = { (int64_t)np, (int64_t)nc };
-    int64_t *all = malloc((size_t)ctx->nprocs * 2 * sizeof *all);
-    h5c_status_t st = agree(ctx, all ? H5C_OK :
-        h5c__fail(H5C_ERR_NOMEM, "cannot allocate rank counts"));
-    if (st != H5C_OK) { free(all); return st; }
-    if (MPI_Allgather(mine, 2, MPI_INT64_T, all, 2, MPI_INT64_T,
+    int64_t offsets[2], totals[2];
+    if (MPI_Exscan(mine, offsets, 2, MPI_INT64_T, MPI_SUM,
+                   ctx->comm) != MPI_SUCCESS) {
+        return h5c__fail(H5C_ERR_MPI, "MPI_Exscan failed collecting offsets");
+    }
+    /* MPI_Exscan leaves rank 0's result undefined. */
+    if (ctx->me == 0) { offsets[0] = offsets[1] = 0; }
+    if (MPI_Allreduce(mine, totals, 2, MPI_INT64_T, MPI_SUM,
                       ctx->comm) != MPI_SUCCESS) {
-        free(all);
-        return h5c__fail(H5C_ERR_MPI, "MPI_Allgather failed collecting counts");
+        return h5c__fail(H5C_ERR_MPI, "MPI_Allreduce failed collecting totals");
     }
-    viz->point_offset = viz->cell_offset = 0;
-    viz->total_points = viz->total_cells = 0;
-    for (int r = 0; r < ctx->nprocs; r++) {
-        if (r < ctx->me) {
-            viz->point_offset += (size_t)all[2 * r];
-            viz->cell_offset += (size_t)all[2 * r + 1];
-        }
-        viz->total_points += (size_t)all[2 * r];
-        viz->total_cells += (size_t)all[2 * r + 1];
-    }
-    free(all);
+    viz->point_offset = (size_t)offsets[0];
+    viz->cell_offset = (size_t)offsets[1];
+    viz->total_points = (size_t)totals[0];
+    viz->total_cells = (size_t)totals[1];
     return H5C_OK;
 }
 

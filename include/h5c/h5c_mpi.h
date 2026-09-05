@@ -5,9 +5,7 @@
  * and h5c_viz.h without MPI headers. The parallel implementation is built
  * with H5C_ENABLE_PARALLEL=ON; h5c_parallel defines H5C_HAVE_PARALLEL.
  *
- * ---------------------------------------------------------------------------
  * Storage layout (identical to h5fortran, see docs/FORMAT.md)
- * ---------------------------------------------------------------------------
  *
  * Writing a distributed array to path P produces a GROUP:
  *
@@ -24,9 +22,7 @@
  * interoperate directly. A local extent of 0 is allowed. Every other
  * dimension must agree across all ranks.
  *
- * ---------------------------------------------------------------------------
  * Collective discipline
- * ---------------------------------------------------------------------------
  *
  * Every call here is collective over the file's communicator: all ranks must
  * call it, in the same order, with the same path. Transfers are collective by

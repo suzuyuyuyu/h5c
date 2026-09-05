@@ -20,7 +20,7 @@ struct h5c_viz {
     const h5c_viz_ops *ops;
     void *context;
 
-    /* --- the ONE current mesh; see close_mesh() ------------------- */
+    /* the ONE current mesh; see close_mesh() */
     int            have_mesh;
     char          *name;    /* owned */
     h5c_viz_kind_t kind;

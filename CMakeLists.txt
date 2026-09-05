@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(h5c
-    VERSION 0.1.0
+    VERSION 0.1.1
     DESCRIPTION "Compact C wrapper around the HDF5 C API"
     LANGUAGES C
 )
@@ -39,10 +39,6 @@ if(H5C_ENABLE_PARALLEL)
             "H5C_ENABLE_PARALLEL requires an HDF5 build with parallel I/O support")
     endif()
 endif()
-
-# ---------------------------------------------------------------------
-# library
-# ---------------------------------------------------------------------
 
 set(h5c_serial_sources
     src/serial/h5c_error.c
@@ -99,17 +95,9 @@ if(H5C_ENABLE_PARALLEL)
     )
 endif()
 
-# ---------------------------------------------------------------------
-# tests
-# ---------------------------------------------------------------------
-
 if(H5C_BUILD_TESTS)
     add_subdirectory(test)
 endif()
-
-# ---------------------------------------------------------------------
-# install / export
-# ---------------------------------------------------------------------
 
 install(TARGETS ${h5c_install_targets}
     EXPORT h5cTargets

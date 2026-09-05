@@ -28,10 +28,6 @@ extern "C" {
 /* Maximum rank handled by the info struct. HDF5's own limit is 32. */
 #define H5C_MAX_RANK 32
 
-/* ------------------------------------------------------------------ */
-/* Status                                                              */
-/* ------------------------------------------------------------------ */
-
 /*
  * Numeric values are APPEND-ONLY. Never renumber an existing member:
  * callers may have been compiled against an older header.
@@ -66,10 +62,6 @@ typedef struct h5c_error {
 
 const h5c_error_t *h5c_last_error(void);
 
-/* ------------------------------------------------------------------ */
-/* Library lifecycle                                                   */
-/* ------------------------------------------------------------------ */
-
 /*
  * Optional. Every entry point initialises the library on first use, so callers
  * may skip this. Its real job is installing h5c's error handling, which
@@ -86,10 +78,6 @@ void h5c_finalize(void);
  * 1 = also let HDF5 print its native error stack to stderr.
  */
 void h5c_set_error_verbosity(int level);
-
-/* ------------------------------------------------------------------ */
-/* Datatypes                                                           */
-/* ------------------------------------------------------------------ */
 
 typedef enum h5c_type {
     H5C_TYPE_UNKNOWN = 0,
@@ -127,10 +115,6 @@ typedef int8_t h5c_bool_t;
 
 /* Size of one element of `type` in memory. Returns 0 for unknown/string. */
 size_t h5c_type_size(h5c_type_t type);
-
-/* ------------------------------------------------------------------ */
-/* Files                                                               */
-/* ------------------------------------------------------------------ */
 
 typedef struct h5c_file h5c_file_t;
 
@@ -175,10 +159,6 @@ h5c_status_t h5c_file_from_hid(hid_t fid, h5c_file_t **out);
  * Always 0 in a build without parallel support, and 0 for a NULL handle.
  */
 int h5c_is_parallel(const h5c_file_t *file);
-
-/* ------------------------------------------------------------------ */
-/* Datasets                                                            */
-/* ------------------------------------------------------------------ */
 
 /* Flags for h5c_write(). */
 #define H5C_WRITE_DEFAULT 0u
@@ -247,10 +227,6 @@ h5c_status_t h5c_read_alloc(h5c_file_t *file, const char *path,
 
 void h5c_free(void *ptr);
 
-/* ------------------------------------------------------------------ */
-/* Strings                                                             */
-/* ------------------------------------------------------------------ */
-
 /*
  * Strings are stored as a scalar dataset of fixed-length H5T_C_S1, which is
  * what h5fortran writes and reads. The stored length is strlen(value).
@@ -272,10 +248,6 @@ h5c_status_t h5c_write_string_vlen(h5c_file_t *file, const char *path,
 h5c_status_t h5c_read_string(h5c_file_t *file, const char *path, char **out);
 
 void h5c_free_string(char *s);
-
-/* ------------------------------------------------------------------ */
-/* Attributes                                                          */
-/* ------------------------------------------------------------------ */
 
 /*
  * `obj_path` may name a dataset, a group, or "/" for the root group.
@@ -328,10 +300,6 @@ h5c_status_t h5c_read_attr_array(h5c_file_t *file, const char *obj_path,
 h5c_status_t h5c_attr_length(h5c_file_t *file, const char *obj_path,
                              const char *name, size_t *count);
 
-/* ------------------------------------------------------------------ */
-/* Interleaved multi-component fields                                  */
-/* ------------------------------------------------------------------ */
-
 /*
  * Vector and tensor fields are stored INTERLEAVED as [n, ncomp], because that
  * is what XDMF3 Vector/Tensor attributes require and what h5fortran's
@@ -369,10 +337,6 @@ h5c_status_t h5c_read_component(h5c_file_t *file, const char *path,
  */
 void   h5c_set_pack_limit(size_t bytes);
 size_t h5c_pack_limit(void);
-
-/* ------------------------------------------------------------------ */
-/* Typed convenience wrappers                                          */
-/* ------------------------------------------------------------------ */
 
 /*
  * One set per type: scalar, 1-D, and N-D. Rank is carried by `dims`, so there
