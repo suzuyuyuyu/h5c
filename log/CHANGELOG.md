@@ -1,145 +1,33 @@
-# CHANGELOG
+# 変更履歴
 
-## 0.1.1
-
-`h5c` の最初の実装。`h5fortran` を仕様の参照元として、HDF5 C API 上に
-独立した C ラッパーを構築した。
-
-### 追加
+## v0.1.1
 
 - serial / parallel を別ターゲットに分離し、一つのインストールで両 API を提供。可視化実装は共有し、並列 open の宣言を `h5c_viz_mpi.h` に分離。
+- 通常 dataset を保存時の rank 分割に依存せず読み込む `h5c_pread_rows()` を追加。
+- `test_crosslang` の h5fortran 生成物の位置を `H5C_H5FORTRAN_ARTIFACT` で指定できるようにし、未指定時のスキップを明示するようにした。従来は絶対パス固定で、他のチェックアウトでは常にスキップされていた。
 
-**可視化 writer の serial 対応（breaking change）**
+## v0.1.0
 
-- `h5c_viz_open(path, time, &out)` を MPI なしで利用できるようにした。
-- 旧来の parallel 用シグネチャは `h5c_viz_popen(path, time, comm, info, &out)`
-  に変更した。既存の呼び出し側はこの名前へ移行する必要がある。
-
-**可視化 writer（`h5c_viz.h`、scheme_version = 1）**
-
-- `h5fortran` の `t_phdf5_writer` と同一レイアウトの HDF5 時系列を書く。
-  Python の `h5xdmf` が `h5c` の出力から XDMF3 を生成できることを実測で確認した
-  （`h5fortran` 用に書かれたツールがそのまま読めることが、形式が同一である証明）。
-- unstructured mesh と point cloud、1 ファイル複数 mesh、scalar / Vector /
-  Tensor6 / Tensor の field。
-- connectivity はランクローカル 0-origin で受け、writer が node offset を加えて
-  global ID にする。範囲外 index は拒否する。呼び出し側に node 番号の統合通信は不要。
-- `h5fortran` が fypp で約 60 手続きに展開している部分が 10 関数に収まる。
-  型は enum が吸収するため。
-
-**バージョン定数（`h5c_version.h`、CMake から生成）**
-
-- `H5C_VERSION` / `_MAJOR` / `_MINOR` / `_PATCH` と `H5C_SCHEME_VERSION`。
-- `h5fortran` は `scheme_version = 製品 major` としているが踏襲しない。scheme は
-  共有する形式契約であり、`h5c` 自身の都合で major が上がると相互運用が壊れる。
-
-**中核**
-
-- ファイル操作（`h5c_open` / `h5c_close`、3 値の mode を常に明示）
-- 汎用 read / write（平坦バッファ + 明示的な shape、rank は `dims` の長さで表現）
-- 型ごとの薄いラッパー（scalar / 1D / ND / インターリーブ × `f32` / `f64` / `i8` / `i16` / `i32` / `i64` / `bool`）
-- 形状問い合わせ `h5c_dataset_info()` と、確保も行う `h5c_read_alloc()`
-- 文字列 dataset（固定長が既定、可変長は明示 API、読みは両対応）
-- 文字列・数値スカラー属性（dataset / group / root group が対象）
-- Parallel I/O（`__partition__` による分割、collective / independent、
-  communicator と MPI-IO ヒントの指定）
-- 多成分フィールドのインターリーブ I/O（`[n, ncomp]`、書きはパック、読みは strided）
-- レイアウトアクセサ `h5c_poffset()` / `h5c_ppartition()`
-- `h5c_is_parallel()`（`mpi.h` を含まないコードから分岐できる）
-
-**エラー処理**
-
-- 全関数が `h5c_status_t` を返す。原因分類が enum の値だけで判別できる粒度
-- ファイルごとの sticky status（最初の非ゼロを保持）
-- thread-local な `h5c_last_error()`（status、生の `herr_t`、メッセージ）
-- HDF5 の巨大なエラースタック出力を既定で抑制
-
-### `h5fortran` から意図的に変えた点
-
-- **communicator を選べる**。`h5fortran` は `MPI_COMM_WORLD` 決め打ち
-- **collective / independent を明示的に切り替えられる**。既定は collective
-- **ゼロサイズ選択に `H5Sselect_none()` を使う**。長さ 0 の hyperslab 選択は
-  HDF5 や MPI-IO の実装で扱いが揺れうるため
-- **検証エラーを `MPI_Allreduce` で全ランク集約する**。1 ランクだけが早期に
-  抜けて残りが collective 呼び出しへ進むデッドロックを防ぐ
-- **`bool` をファイル上で int8 基底の enum にした**。`h5fortran` は int32 で、
-  1 要素 4 バイトを使っている。int8 なら 1 バイトで済み、`h5dump` は
-  `TRUE` / `FALSE` と表示し、h5py は `np.bool_` として読む。
-  `h5fortran` はこれを `logical` として読めることを実測で確認した
-- **open mode と dataset 置換を分離した**。`h5fortran` は `mode` を両方に
-  流用しているが、これは概念の重ね掛けである
-- **`integer(int64)` に対応した**。`h5fortran` の汎用 API にはない
-
-### 修正
-
-実装と検証の過程で見つかった、いずれも h5fortran との相互運用に関わるもの。
-
-- Tensor6の成分順序をParaViewの対称テンソル規約
-  `XX, YY, ZZ, XY, YZ, XZ`へ統一した。
-- parallel buildでは`MPI_Init`を呼ぶ`test_viz`を`mpi`ラベルへ移し、
-  ログインノード向け`quick`テストから除外した。
-
-- **`h5c_read_bool()` が `h5fortran` の `logical`（int32 の 0/1）を読めなかった。**
-  HDF5 は enum → integer の変換は行うが **integer → enum の変換経路を持たない**。
-  bool の enum をメモリ型にも使っていたため `H5Dread` が失敗していた。読み込みだけ
-  `H5T_NATIVE_INT8` を経由するようにした（書き込みは enum のまま、変換なし）。
-  `docs/FORMAT.md` は「HDF5 が変換するので問題ない」と書いていたが誤りで、
-  実際に検証していたのは逆方向だった。**片方向で測って両方向を主張していた。**
-- **逐次のインターリーブが `n == 0` で NULL 成分を拒否していた。** ヘッダは
-  「`n == 0` なら成分ポインタは NULL でよい」「逐次にも同様に当てはまる」と
-  書いていたが、並列側だけ実装が追随していた。C++ では
-  `std::vector<T>{}.data()` が NULL なので、空フィールドの自然な書き方が
-  例外になっていた。
-- **`h5c_open()` が存在しないファイルに `H5C_ERR_HDF5` を返していた。** ヘッダは
-  `H5C_ERR_NOT_FOUND` を「no such file」と定義しており、呼び出し側が「無い」と
-  「あるが使えない」を区別できなかった。
-
-### 相互運用性
-
-`h5fortran` が書いたファイルはそのまま読め、逆も同様である。
-HDF5 の Fortran ライブラリが dims を反転して記録するため、
-**Fortran の `(nx, ny)` は C の `{ny, nx}`** に対応し、転置もコピーも不要である。
-
-実測で確認した（`h5fortran` の `r64_2d(2,3)` はファイル上 `{3,2}`、
-h5c が同じバイト列を生成する）。
-
-### テスト
-
-- `test_crosslang` — 素の HDF5 C API だけで参照ファイルを組み立て、次元順序・
-  ディスク上の型・bool の enum メンバ・文字列の SPACEPAD・インターリーブの
-  バイト配置・ゼロ長 extent を固定する。**参照 `.h5` はコミットしない。**
-  `h5fortran` の実出力があればそれとも突き合わせる。
-- `test_pviz` — 可視化 writer。ランクローカル → global ID 変換、空ランク、
-  複数 mesh、connectivity の全整数型、属性を検証（4 ランクで実行確認）。
-
-### 既知の制約
-
-- `chunking` と圧縮は未対応
-- 複数次元の同時分割は `__partition__` の形式上表現できない
-- 配列属性は未対応（大きなデータは dataset にすべき）
-- Parallel の文字列 I/O は未対応（`h5fortran` も同様）
-- 並列テストは 4 ランクまで実行して確認した
-- real128 に非対応（`h5fortran` は対応）。Fortran の real128 は IEEE binary128 で、
-  C では `__float128` というコンパイラ拡張が必要になるため
-
-### 開発上の注意
-
-- 並列テストは **ラベル `mpi`** で、`quick` には含まれない。ログインノードで
-  `ctest -L quick` を打っても MPI は起動しない
-- 並列テストは `sbatch scripts/run-mpi-tests.sh` で投入する
-- `stdout/` と `stderr/` はリポジトリに存在させている。Slurm がジョブ開始前に
-  これらを開くため、無いとジョブが 1 秒で失敗し出力も残らない
-
-### 追加（属性の拡張）
-
-- 数値**配列**属性（`h5c_write_attr_array` / `h5c_read_attr_array`）と、要素数を
-  問い合わせる `h5c_attr_length`。スカラー属性にも使えて 1 を返す。
-- ディスク上は長さ `count` の 1 次元 dataspace で、型は dataset と同じ
-  リトルエンディアン。`h5fortran` が同じ形式で読み書きすることを実測で確認した
-  （h5fortran の Fortran プログラムが h5c の書いた配列属性を読めること、
-  および h5cpp が h5fortran の書いた配列属性を読めること）。
-- 用途は mesh を注釈する短いベクトル（領域の境界、原点、格子間隔）。
-  HDF5 は属性を object header に置くため、大きなデータは dataset にする。
-# 2026-09-05
-
-- 通常datasetを保存時のrank分割に依存せず読み込む`h5c_pread_rows`を追加。
+- `h5fortran` を仕様の参照元とする、HDF5 C API 上の独立した C ラッパーを実装。
+- ファイル open / close と明示的な3種類の mode、open mode とは独立した dataset 置換を採用。
+- 平坦バッファと明示的な shape による汎用 read / write、scalar / 1D / ND / インターリーブの型別 API（f32 / f64 / i8 / i16 / i32 / i64 / bool）を追加。
+- `h5c_dataset_info()`、`h5c_read_alloc()`、固定長・可変長文字列 dataset の I/O を追加。
+- dataset / group / root group の文字列・数値スカラー属性を追加。
+- 数値配列属性の `h5c_write_attr_array()` / `h5c_read_attr_array()` と、スカラーにも使える `h5c_attr_length()` を追加し、Fortran / C++ との相互運用を確認。
+- `__partition__` による Parallel I/O、communicator / MPI-IO ヒント指定、collective（既定）/ independent の切り替えを追加。
+- `[n, ncomp]` の多成分 I/O（書き込みはパック、読み込みは strided）、`h5c_poffset()` / `h5c_ppartition()` / `h5c_is_parallel()` を追加。
+- 空ランクには `H5Sselect_none()` を使い、検証エラーを `MPI_Allreduce` で全ランク集約する方式を採用。
+- status enum、ファイル単位の sticky status、thread-local な `h5c_last_error()` を追加し、HDF5 エラースタック出力を既定で抑制。
+- bool の保存形式に int8 基底の enum を採用し、Fortran の logical との相互運用を確認。
+- `h5c_viz.h` に scheme 1 の可視化 writer を追加し、h5fortran と共通レイアウトで h5xdmf による XDMF3 生成を確認。
+- unstructured mesh / point cloud、複数 mesh、Scalar / Vector / Tensor6 / Tensor に対応し、型の違いは enum で扱う API を採用。
+- connectivity のランクローカル 0-origin から global ID への変換と、範囲外 index の拒否を追加。
+- 可視化の逐次 open を `h5c_viz_open(path, time, &out)`、並列 open を `h5c_viz_popen(path, time, comm, info, &out)` に分離（既存の並列呼び出しは移行が必要）。
+- `H5C_VERSION` / `_MAJOR` / `_MINOR` / `_PATCH` と、製品バージョンから独立した `H5C_SCHEME_VERSION` を追加。
+- Tensor6 の成分順を ParaView の `XX, YY, ZZ, XY, YZ, XZ` に統一。
+- Fortran logical（int32）の bool 読み込みを修正し、読み込みには `H5T_NATIVE_INT8` を使用。
+- 逐次インターリーブで `n == 0` の NULL 成分を許可し、存在しないファイルの open は `H5C_ERR_NOT_FOUND` を返すよう修正。
+- Fortran `(nx, ny)` と C `{ny, nx}` の次元順序・バイト配置の相互運用を、転置・コピーなしで確認。
+- `test_crosslang` に次元順序・型・bool enum・SPACEPAD・インターリーブ・ゼロ長 extent の検証を追加し、参照 HDF5 は実行時生成とした。
+- `test_pviz` に ID 変換・空ランク・複数 mesh・connectivity の整数型・属性の検証を追加し、4ランクまで確認。
+- MPI を使うテストを `mpi` ラベルに分離して `quick` から除外し、ジョブスクリプト経由で実行する運用を採用。`stdout/` / `stderr/` を配置。

@@ -30,8 +30,10 @@ target_link_libraries(my_program PRIVATE h5c::h5c_serial)
 を指定して `H5C_ENABLE_PARALLEL=OFF` で構成してください**。
 
 `h5c.h` は `<hdf5.h>` を include しますが、MPI ヘッダーは読み込みません。
-`hid_t` を自前で宣言せず HDF5 の定義をそのまま使うのは、`hid_t` の実体が
-HDF5 のバージョンによって変わるためです（1.12 より前は `int`）。
+`hid_t` は HDF5 が提供する定義を使います。**自前で宣言しないでください。**
+実体は HDF5 のビルドによって異なり、`int64_t` のものと `int` のものが実在します
+（このマシン上にも両方あります）。自前で宣言すると、宣言と食い違う HDF5 に対して
+静かに壊れます。
 並列 HDF5 の `hdf5.h` は `mpi.h` を引き込みますが、これは HDF5 の
 imported target が include パスを運ぶため、MPI ラッパーなしでも解決します。
 
@@ -216,7 +218,10 @@ double got = 0.0;
 h5c_read_attr_scalar(f, "/", "time", &got, H5C_F64);
 ```
 
-同名の属性は置き換えられます。配列属性は用途が限られるため対応していません。
+同名の属性は置き換えられます。数値配列属性には `h5c_write_attr_array()` /
+`h5c_read_attr_array()`、要素数の問い合わせには `h5c_attr_length()` を使います。
+スカラー属性にも使え、要素数は1です。保存形式と用途は
+[FORMAT.md](FORMAT.md#数値配列属性) を参照してください。
 
 ## 多成分フィールド（ベクトル・テンソル）
 
@@ -452,6 +457,8 @@ uv run h5xdmf "<dir>/result/seq*.h5" --metadata <dir>/result/metadata.h5 --outdi
 
 ## テストの実行
 
+`stdout/` と `stderr/` はジョブ投入前に作成してください。
+
 `test_crosslang` の phase E は、h5fortran の逐次テストが生成した
 `test-serial.h5` を読み込みます。環境変数 `H5C_H5FORTRAN_ARTIFACT` が設定されて
 いればその値を優先し、未設定なら CMake 構成時にソースディレクトリから求めた
@@ -475,3 +482,8 @@ sbatch scripts/run-mpi-tests.sh     # 並列テスト。バッチ投入のみ
 `mpiexec` の起動はバッチ経由です。`mpi` ラベルを `quick` に含めていないのは、
 ログインノードで習慣的に打つコマンドが誤って MPI ジョブを起動しないように
 するためです。
+
+## 未対応の機能
+
+chunking・圧縮と Parallel の文字列 I/O は未対応です。複数次元の同時分割と
+real128 の制約については [FORMAT.md](FORMAT.md) を参照してください。

@@ -91,10 +91,6 @@ HDF5 は **enum → integer の変換は行うが、integer → enum の変換�
 何も変わらない。この非対称性は「メモリ型を 1 つに揃える」という一見無害な整理で
 壊れるため、`test/test_crosslang.c` が明示的に検査している。
 
-なお当初この文書は「HDF5 が I32→I8 変換を行うので問題ない」と書いていたが、
-これは誤りだった。実際に検証していたのは逆方向（`h5fortran` が `h5c` の enum を
-`H5T_NATIVE_INTEGER` で読む）であり、それを反対方向にも一般化していた。
-
 0 / 1 以外の値は検証されずそのまま書かれる。正規化には一時バッファと
 全要素の走査が必要で、速度優先の方針に反するためである。
 
@@ -103,6 +99,12 @@ HDF5 は **enum → integer の変換は行うが、integer → enum の変換�
 書き込みの既定は固定長 `H5T_C_S1`（`h5fortran` が読める形式）。読み込みは
 固定長・可変長の両方を受け付ける。可変長で書きたい場合は
 `h5c_write_string_vlen()` を明示的に呼ぶが、`h5fortran` はそれを読めない。
+
+## 数値配列属性
+
+数値配列属性は長さ `count` の1次元 dataspace に、dataset と同じ
+リトルエンディアンの型で保存する。h5fortran と同じ形式で相互運用できる。
+短い数値ベクトルに使い、大きなデータは dataset にする。
 
 ## Parallel の分割レイアウト
 
@@ -243,9 +245,7 @@ IEEE binary128 で、C では `long double` ではなく `__float128`（コン�
 製品バージョンは `h5c` / `h5fortran` / `h5cpp` で独立した SemVer とする。
 共有するのはこのフォーマット契約だけである。
 
-`h5fortran` は `scheme_version = 製品 major` としているが、**`h5c` は踏襲しない**。
-scheme は共有する契約であり、`h5c` 自身の都合で major が上がった瞬間に
-相互運用が壊れるためである。`H5C_SCHEME_VERSION`（`h5c_version.h`）は明示的に
+`H5C_SCHEME_VERSION`（`h5c_version.h`）は製品バージョンから独立した
 1 とする。**reader はこの値を仮定せず、対象ファイルの `scheme_version` 属性を
 読んで判断する。**
 
