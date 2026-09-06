@@ -1,0 +1,16 @@
+これは、LLMエージェント用のマニュアルです。Cではh5c、C++では薄いラッパーのh5cppを使って実装してください。
+インストール先はINSTALL.llms.txtに従って確認し、不明ならユーザーに尋ねてCMAKE_PREFIX_PATHに指定してください。
+CMakeではfind_package(h5c CONFIG REQUIRED)、C++ではfind_package(h5cpp CONFIG REQUIRED)を使ってください。
+Cのターゲットはh5c::h5c_serial、並列有効時のh5c::h5c_parallel、包括ターゲットh5c::h5cです。
+C++のターゲットはh5cpp::h5cpp_serial、並列有効時のh5cpp::h5cpp_parallel、包括ターゲットh5cpp::h5cppです。
+包括ターゲットは逐次のみ、または並列有効時には逐次と並列の両方をリンクします。
+Cのヘッダーはinclude/h5c/直下です。逐次用は<h5c/h5c.h>と<h5c/h5c_viz.h>、並列用は<h5c/h5c_mpi.h>と<h5c/h5c_viz_mpi.h>です。
+逐次ヘッダー自体はMPIを直接includeしませんが、Parallel HDF5経由ではMPIを取り込みます。完全にMPIを外すには逐次版HDF5と逐次構成のh5cを使ってください。
+C++のヘッダーは<h5cpp/h5cpp.hpp>、<h5cpp/h5cpp_viz.hpp>、並列用の<h5cpp/h5cpp_mpi.hpp>、<h5cpp/h5cpp_viz_mpi.hpp>です。
+可視化には逐次用h5cpp::viz、並列用にはそれを継承するh5cpp::parallel_vizを使ってください。
+両リポジトリのexample/にはserial/、parallel/、serial-viz/、parallel-viz/があります。
+interleavedの例はh5cではexample/interleaved/とexample/parallel-interleaved/、h5cppではexample/serial-interleaved/とexample/parallel-interleaved/です。
+両方のexample/は独立したCMakeプロジェクトです。ライブラリ本体のビルドにexampleターゲットは含まれません。
+各リポジトリでcmake -S example -B example/buildを別途configureし、確認済みのインストール先をCMAKE_PREFIX_PATHに指定してください。
+exampleはfind_package(h5c)またはfind_package(h5cpp)で利用し、未インストール時は親のソースからビルドするフォールバックがあります。並列例には並列ターゲットが必要です。
+可視化出力はh5fortranと同様にh5xdmfでXDMFへ変換します。h5xdmfリポジトリのinstructions/を参照してください。
