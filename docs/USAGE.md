@@ -2,10 +2,8 @@
 
 概要とビルド方法は [README.md](../README.md)、ファイルフォーマットの仕様は
 [FORMAT.md](FORMAT.md) を参照してください。この文書は API の使い方を扱います。
-
-各関数の契約（所有権、エラー、collective 性）は `include/h5c/h5c.h` と
-`include/h5c/h5c_mpi.h` のコメントが一次資料です。C ライブラリでは利用者が
-必ずヘッダを読むため、そこを厚くしています。
+以下の断片例ではエラー分岐を省略しています。実際のコードでは
+[エラー処理](#エラー処理) に従って戻り値を確認してください。
 
 ## リンクするターゲットとヘッダー
 
@@ -20,28 +18,14 @@ find_package(h5c CONFIG REQUIRED)
 target_link_libraries(my_program PRIVATE h5c::h5c_serial)
 ```
 
-並列構成の一つのインストールで両 API を使えます。API ごとに prefix を分ける必要は
-ありません。`H5C_HAVE_PARALLEL` は並列ターゲットから伝播する利用可否の目印で、
-公開ヘッダーの宣言は変更しません。ヘッダーはすべて `include/h5c/` 直下です。
-
-各ビルドで使う HDF5 は一つです。並列構成では serial ターゲットも Parallel HDF5
-を使うため、HDF5 経由で MPI に依存します。MPI ラッパーや `MPI_Init()` なしで
-直列 API を利用できますが、**リンクまで完全に MPI 不要にするには、Serial HDF5
-を指定して `H5C_ENABLE_PARALLEL=OFF` で構成してください**。
-
-`h5c.h` は `<hdf5.h>` を include しますが、MPI ヘッダーは読み込みません。
-`hid_t` は HDF5 が提供する定義を使います。**自前で宣言しないでください。**
-実体は HDF5 のビルドによって異なり、`int64_t` のものと `int` のものが実在します
-（このマシン上にも両方あります）。自前で宣言すると、宣言と食い違う HDF5 に対して
-静かに壊れます。
-並列 HDF5 の `hdf5.h` は `mpi.h` を引き込みますが、これは HDF5 の
-imported target が include パスを運ぶため、MPI ラッパーなしでも解決します。
+並列構成の serial ターゲットも HDF5 経由で MPI に依存します。
+リンクまで MPI 不要にするには Serial HDF5 と `H5C_ENABLE_PARALLEL=OFF` を使います。
+HDF5 の型 `hid_t` は公開ヘッダーから利用できます。
 
 ## 初期化
 
-`h5c_init()` は必須ではありません。どの関数も初回呼び出し時に遅延初期化します。
-明示的に呼ぶ意味があるのは、HDF5 が stderr に吐く巨大なエラースタックを
-抑制するタイミングを制御したい場合です。
+`h5c_init()` は省略できます。HDF5 のエラースタックも表示したい場合は
+`h5c_set_error_verbosity(1)` を呼びます。
 
 ```c
 h5c_init();                        /* 任意 */
@@ -49,9 +33,6 @@ h5c_set_error_verbosity(1);        /* HDF5 のエラースタックも見たい�
 ...
 h5c_finalize();                    /* 任意。H5close() を呼ぶ */
 ```
-
-`h5fortran` と違い、`h5open_f` / `h5close_f` に相当する呼び出しを利用者に
-義務付けていません。HDF5 C API が自動初期化されるためです。
 
 ## ファイル
 
@@ -62,15 +43,11 @@ h5c_file_t *f = NULL;
 h5c_status_t st = h5c_open("result.h5", H5C_TRUNCATE, &f);
 ```
 
-| mode | 意味 | `h5fortran` の対応 |
-|---|---|---|
-| `H5C_READ` | 既存ファイルを読み取り専用で開く | `H5FORTRAN_READ_ONLY` |
-| `H5C_READWRITE` | 既存ファイルを読み書きで開く | mode 省略 |
-| `H5C_TRUNCATE` | 新規作成し、既存ファイルを切り詰める | `H5FORTRAN_FORCE_WRITE` |
-
-`h5fortran` は mode 省略で read-write になりますが、これは Fortran の optional
-引数があってこその設計です。C では省略という概念を持たないほうが明快なので、
-3 値の enum を必ず書かせています。
+| mode | 意味 |
+|---|---|
+| `H5C_READ` | 既存ファイルを読み取り専用で開く |
+| `H5C_READWRITE` | 既存ファイルを読み書きで開く |
+| `H5C_TRUNCATE` | 新規作成し、既存ファイルを切り詰める |
 
 既存 HDF5 コードに組み込む場合は、自分で管理している `hid_t` を借用できます。
 
@@ -96,8 +73,8 @@ h5c_write_f64_1d(f, "/rank/one", values, 3);
 h5c_write_f64_scalar(f, "/scalar/value", 42.5);
 ```
 
-型ごとに `scalar` / `1d` / ND の 3 本があります。中核は `h5c_write()` の 1 本で、
-上記はその inline ラッパーです。flags が必要なときは中核を直接呼びます。
+型別の `scalar` / `1d` / ND 関数を使えます。flags を指定する場合は
+`h5c_write()` を使います。
 
 既存 dataset への書き込みは、**形状が一致すればその場に書きます**。
 形状が違う場合は `H5C_ERR_SHAPE_MISMATCH` になり、置き換えるには
@@ -107,14 +84,9 @@ h5c_write_f64_scalar(f, "/scalar/value", 42.5);
 h5c_write(f, "/rank/one", other, H5C_F64, 1, &n, H5C_WRITE_REPLACE);
 ```
 
-`h5fortran` は open mode の値を dataset 置換にも流用していますが、
-h5c では概念を分離しています。
-
 ## 読み込み
 
-**形状を問い合わせてから自分で確保する**のが基本形です。ソルバーでは
-受け側バッファが既に確保済みであることが普通で、ライブラリが `malloc` を
-握るのは速度と所有権の両面で不利なためです。
+形状を問い合わせ、必要な要素数のバッファを確保します。
 
 ```c
 h5c_dataset_info_t info;
@@ -123,6 +95,7 @@ if (h5c_dataset_info(f, "/rank/two", &info) != H5C_OK) { /* ... */ }
 /* info.rank, info.dims[], info.type, info.count */
 double *buf = malloc(info.count * sizeof *buf);
 h5c_read_f64(f, "/rank/two", buf, info.rank, info.dims);
+free(buf);
 ```
 
 形状は**厳密に一致していなければなりません**。次元を入れ替えて渡すと
@@ -137,8 +110,7 @@ h5c_read_alloc(f, "/rank/two", H5C_F64, (void **)&buf, &info);
 h5c_free(buf);
 ```
 
-空の dataset でも `*buf` は非 NULL になります。`NULL` + `H5C_OK` は失敗と
-区別できないためです。
+空の dataset でも `*buf` は非 NULL になります。
 
 存在確認は `h5c_exists()` ですが、これは「存在しない」と「ハンドルや path が
 不正」の両方で 0 を返します。区別が必要なら `h5c_dataset_info()` の status を
@@ -146,14 +118,10 @@ h5c_free(buf);
 
 ## 型
 
-| `h5c_type_t` | C の型 | 備考 |
-|---|---|---|
-| `H5C_F32` | `float` | |
-| `H5C_F64` | `double` | |
-| `H5C_I32` | `int32_t` | |
-| `H5C_I64` | `int64_t` | `h5fortran` の汎用 API には対応なし |
-| `H5C_BOOL` | `h5c_bool_t`（`int8_t`） | ファイル上は int8 基底の enum |
-| `H5C_STRING` | `char *` | 専用 API を使う |
+数値型は `float`、`double`、`int8_t`、`int16_t`、`int32_t`、`int64_t` です。
+型指定には対応する `H5C_F32` / `H5C_F64` / `H5C_I8` / `H5C_I16` /
+`H5C_I32` / `H5C_I64` を使います。保存形式は [FORMAT.md](FORMAT.md#データ型)、
+配列の shape は [次元順序](FORMAT.md#次元順序) を参照してください。
 
 `bool` には `h5c_bool_t` と `H5C_TRUE` / `H5C_FALSE` を使ってください。
 
@@ -162,8 +130,7 @@ h5c_bool_t flags[4] = { H5C_TRUE, H5C_FALSE, H5C_FALSE, H5C_TRUE };
 h5c_write_bool(f, "/flags", flags, 2, (size_t[]){ 2, 2 });
 ```
 
-0 / 1 以外の値は検証されずそのまま書かれます。正規化には一時バッファと
-全要素の走査が必要で、速度優先の方針に反するためです。
+0 / 1 以外の値は検証・正規化されません。
 
 ### ゼロ長 extent
 
@@ -173,9 +140,6 @@ h5c_write_bool(f, "/flags", flags, 2, (size_t[]){ 2, 2 });
 size_t empty[2] = { 0, 3 };
 h5c_write_f64(f, "/empty", NULL, 2, empty);   /* {0,3} の dataset ができる */
 ```
-
-Parallel でランクが 1 行も持たない場合に必要な性質で、Serial でも同じ規則に
-しています。ライブラリ内に検証規則を 2 つ持たないためです。
 
 ## 文字列
 
@@ -188,11 +152,8 @@ printf("%s\n", value);
 h5c_free_string(value);
 ```
 
-書き込みの既定は**固定長**（`H5T_C_S1` + SPACEPAD）で、`h5fortran` が
-そのまま読める形式です。読み込みは固定長・可変長の両方を受け付け、
-右側の空白は取り除かれます。
-
-可変長で書きたい場合は明示的に呼びますが、**`h5fortran` は読めません**。
+読み込みは末尾の空白を除去します。可変長で書く場合は次を使います。
+保存形式と相互運用の制約は [FORMAT.md](FORMAT.md#データ型) を参照してください。
 
 ```c
 h5c_write_string_vlen(f, "/text/note", "...", H5C_WRITE_DEFAULT);
@@ -200,8 +161,7 @@ h5c_write_string_vlen(f, "/text/note", "...", H5C_WRITE_DEFAULT);
 
 ## 属性
 
-対象は dataset、group、root group（`"/"`）です。dataset 書き込みとは
-API を分けています。可変長引数や構造体配列は C では読みにくいためです。
+対象は dataset、group、root group（`"/"`）です。
 
 ```c
 h5c_write_attr_str(f, "/rank/two", "units", "m/s");
@@ -226,7 +186,7 @@ h5c_read_attr_scalar(f, "/", "time", &got, H5C_F64);
 ## 多成分フィールド（ベクトル・テンソル）
 
 ソルバーが `u`, `v`, `w` を別々に持っていても、そのまま渡せます。
-ファイル上は `[n, ncomp]` にインターリーブされます。
+成分の配置と順序は [FORMAT.md](FORMAT.md#多成分フィールド) を参照してください。
 
 ```c
 const double *comps[3] = { u, v, w };
@@ -236,25 +196,13 @@ double *out[3] = { gu, gv, gw };
 h5c_read_interleaved_f64(f, "/fields/velocity", out, 3, npoints);
 ```
 
-インターリーブが必要なのは **XDMF3 の Vector / Tensor attribute がこの配置を
-要求する**からです。ParaView にベクトルとして認識させることで、
-velocity magnitude の色付けやテンソル不変量の計算が使えます。
-
-`ncomp` は 1 / 3 / 6 / 9 が `Scalar` / `Vector` / `Tensor6` / `Tensor` に対応します。
-`ncomp = 6`（対称3×3）の成分順はParaViewの対称テンソル規約に従い
-**`XX, YY, ZZ, XY, YZ, XZ`**です。
-
 1 成分だけ欲しいときは、他の成分を一切読みません。
 
 ```c
 h5c_read_component_f64(f, "/fields/velocity", v_only, 1, npoints);
 ```
 
-**書き込みはパック、読み込みは strided** です。stride 付きの collective 書き込みは
-MPI-IO で read-modify-write を誘発するため避けています。読み込みにはその問題が
-なく、転送量が `1/ncomp` で済みます。
-
-大きなフィールドは自動でタイル分割されます。上限は変更できます。
+成分配列の書き込みに使う一時バッファの上限を変更できます。
 
 ```c
 h5c_set_pack_limit(64u * 1024u * 1024u);   /* 既定は 256 MiB */
@@ -262,12 +210,8 @@ h5c_set_pack_limit(64u * 1024u * 1024u);   /* 既定は 256 MiB */
 
 ### 注意
 
-`n` は**検証できません**。各成分は長さを持たない生ポインタなので、実際の長さより
-大きい `n` を渡すと範囲外アクセスになります。C ではこれ以上できないので、
-長さを持ち運ぶラッパー（`h5cpp` は span を使っています）を挟むのが安全です。
-
-`ncomp == 0` はエラーですが `n == 0` は正当です。後者はそのランクが行を
-持たないことを意味し、成分ポインタも `NULL` でよいという意図的な非対称です。
+各成分のバッファは少なくとも `n` 要素必要です。長さは検証されません。
+`ncomp == 0` はエラーです。`n == 0` なら成分ポインタは `NULL` でも構いません。
 
 ## エラー処理
 
@@ -290,15 +234,11 @@ if (st == H5C_ERR_NOT_FOUND) {
 ```c
 h5c_status_t failed = h5c_file_status(f);   /* 何か失敗していたか */
 h5c_status_t closed = h5c_close(f);         /* close は成功したか */
-h5c_file_clear_status(f);                   /* 意図的な失敗の後で消す */
 ```
 
-**`h5c_close()` は close 自体の成否だけを返します。** 両者を混ぜると
-「ファイルが flush されていない可能性がある」と「過去の処理済みの失敗」を
-区別できず、前者に対処できなくなるためです。ハンドルは close で解放されるので、
-sticky status は close の前に読んでください。
-
-status の数値は追記のみで、既存の値は変わりません。
+`h5c_close()` は close 自体の成否だけを返し、ハンドルを解放します。
+過去のエラーは close 前に確認してください。処理済みのエラーを消すには、
+ハンドルが有効な間に `h5c_file_clear_status(f)` を呼びます。
 
 ## Parallel I/O
 
@@ -324,8 +264,7 @@ h5c_popen_comm("out.h5", H5C_READWRITE, my_comm, my_info, &f);
 
 ### 分割の規則
 
-分割方向は **`dims[0]`**（最も低速に変化する軸）です。Fortran の最終次元と
-同じファイル軸なので、`h5fortran` との相互運用がそのまま成立します。
+保存レイアウトは [FORMAT.md](FORMAT.md#parallel-の分割レイアウト) を参照してください。
 
 `dims[0]` はランクごとに違ってよく、0 も許されます。それ以外の次元は
 全ランクで一致していなければなりません。
@@ -340,6 +279,7 @@ size_t count = 0;
 h5c_ppartition(f, "/coords", NULL, 0, &count);       /* 長さを問い合わせる */
 int64_t *bounds = malloc(count * sizeof *bounds);
 h5c_ppartition(f, "/coords", bounds, count, NULL);   /* 全ランクの境界 */
+free(bounds);
 ```
 
 `h5c_pdataset_info()` は形状（ローカルとグローバル）を返しますが、
@@ -347,13 +287,9 @@ h5c_ppartition(f, "/coords", bounds, count, NULL);   /* 全ランクの境界 */
 
 ### collective の規律
 
-**すべての呼び出しは collective** で、全ランクが同じ順序で同じパスに対して
-呼ぶ必要があります。
-
-引数の検証は HDF5 の collective 呼び出しより前に `MPI_Allreduce` で
-全ランク集約されます。そのため 1 ランクだけの不正な引数は**デッドロックせず、
-全ランクで同じエラー**になります。これがないと、失敗したランクが早期に抜けて
-残りが collective 呼び出しの中で待ち続けます。
+並列 open・close・読み書き・形状と担当範囲の問い合わせは collective です。
+全ランクが同じ順序で同じパスに対して呼びます。MPI は open 前に初期化し、
+close 後に終了してください。MPI プログラムはジョブスクリプトから実行します。
 
 転送は既定で collective です。切り替えは明示的にのみ行われます。
 
@@ -361,9 +297,7 @@ h5c_ppartition(f, "/coords", bounds, count, NULL);   /* 全ランクの境界 */
 h5c_pset_collective(f, 0);   /* independent へ */
 ```
 
-これは通信を伴わないローカルな状態ですが、**全ランクで同じ値でなければ
-なりません**。collective な転送は全ランクが同じモードを要求している必要が
-あるためです。
+`h5c_pset_collective()` はローカルな設定ですが、全ランクで同じ値にしてください。
 
 `h5c_is_parallel()` は `h5c/h5c.h` にあるので、`mpi.h` を含まないコードからも
 並列ハンドルかどうかを判定できます。
@@ -376,114 +310,16 @@ h5c_pwrite_interleaved(f, "/fields/velocity", (const void *const *)comps,
                        3, nlocal, H5C_F64, H5C_WRITE_DEFAULT);
 ```
 
-タイル分割が必要な場合、**タイル数は `MPI_Allreduce(MAX)` で全ランクで
-合意されます**。ローカルな `n` から各ランクが独自にタイル数を決めると、
-collective 呼び出しの回数が食い違ってデッドロックするためです。
-行を使い切ったランクも空選択で全ての呼び出しに参加します。
+行数 0 のランクも同じ呼び出しに参加します。
 
-## 可視化出力
+### 読み込み条件
 
-`h5c/h5c_viz.h` は ParaView 向けの HDF5 時系列を書きます。XML は生成せず、
-Python の `h5xdmf` が後段で XDMF3 を作ります。形式は `h5fortran` の
-`t_phdf5_writer` と同一なので、**同じ Python ツールがどちらの出力も読みます**。
+`h5c_pread()` は保存時と同じ MPI プロセス数で使います。
+保存された境界配列の長さ・先頭・単調性・全体長が不正な場合は読み込みに失敗します。
+通常の dataset から任意の連続行を読むには `h5c_pread_rows()` を使います。
+これは保存済み partition を参照せず、offset とローカル shape を指定します。
 
-1 ステップ 1 ファイルが想定で、`time` がその位置を決めます。
+## 可視化と制約
 
-```c
-#include <h5c/h5c_viz.h>
-
-h5c_viz_t *viz = NULL;
-h5c_viz_mesh_t mesh = {0};      /* 0 と NULL は既定値になる */
-
-/* serial: MPI なし */
-h5c_viz_open("result/seq000000.h5", t, &viz);
-
-mesh.kind              = H5C_VIZ_UNSTRUCTURED;
-mesh.name              = "fluid";
-mesh.topology          = "Tetrahedron";
-mesh.nodes_per_element = 4;
-mesh.num_points        = npoints;    /* このランクの分だけ */
-mesh.num_cells         = ncells;     /* 所有する cell だけ。ghost は除く */
-h5c_viz_begin_mesh(viz, &mesh);
-
-h5c_viz_write_nodes(viz, nodes, H5C_F64);            /* [npoints, 3] */
-h5c_viz_write_connectivity(viz, conn, H5C_I32);      /* ランクローカル 0-origin */
-h5c_viz_write_point_data(viz, "Pressure", p, H5C_F64, 1);
-h5c_viz_write_point_data(viz, "Velocity", v, H5C_F64, 3);   /* → Vector */
-h5c_viz_write_cell_data(viz, "SubdomainID", id, H5C_I32, 1);
-
-h5c_viz_close(viz);
-```
-
-parallel で collective に書く場合は `h5c/h5c_viz_mpi.h` を include し、
-`h5c_viz_popen()` に communicator と MPI-IO hint を渡します。
-
-```c
-#include <h5c/h5c_viz_mpi.h>
-
-h5c_viz_popen("result/seq000000.h5", t, MPI_COMM_WORLD, MPI_INFO_NULL, &viz);
-```
-
-`h5c_viz_open()` と `h5c_viz_popen()` は同じ `h5c_viz_t` を返します。
-`begin_mesh`、各 write と `_comps`、offsets、status、close、attribute_type は
-すべて `h5c_viz.h` に宣言され、開き方によらず同じ直列側の実装を使います。
-
-座標を x/y/z で別々に持っているなら `h5c_viz_write_nodes_comps()`、field も
-`_comps` 版があります。ソルバー側で詰め替える必要はありません。
-
-**connectivity はランクローカルな 0-origin で渡します。** writer が自分のランクの
-node offset を加えて global ID にするので、node 番号を揃えるための通信は不要です。
-範囲外の index は拒否されます（1-origin や既に global な ID を渡すのが実際に
-起きる誤りなので）。
-
-点群は `H5C_VIZ_POLYDATA`、`num_cells = 0` で、connectivity を書きません。
-同じファイルに別の `name` で `begin_mesh` を呼べば複数 mesh を置けます。
-
-serial の呼び出しは通常のローカルな呼び出しです。parallel の場合だけ、
-すべての呼び出しが collective です。parallel では点数・cell 数はランクごとに
-違ってよく、0 でも構いません。
-
-XDMF の生成は別プロジェクトの `h5xdmf` です。
-
-```sh
-cd ../h5xdmf && uv sync
-uv run h5xdmf "<dir>/result/seq*.h5" --metadata <dir>/result/metadata.h5 --outdir <dir>/result
-```
-
-`fluid.xdmf` のように mesh group ごとに出力されます。動く例は
-[`example/serial-viz/`](../example/serial-viz/) と
-[`example/parallel-viz/`](../example/parallel-viz/) にあります。
-レイアウトの詳細は [FORMAT.md](FORMAT.md) を参照してください。
-
-## テストの実行
-
-`stdout/` と `stderr/` はジョブ投入前に作成してください。
-
-`test_crosslang` の phase E は、h5fortran の逐次テストが生成した
-`test-serial.h5` を読み込みます。環境変数 `H5C_H5FORTRAN_ARTIFACT` が設定されて
-いればその値を優先し、未設定なら CMake 構成時にソースディレクトリから求めた
-`../h5fortran/build/test/test-serial.h5` の絶対パスを使います。
-別のビルド先を使う場合は、生成済みファイルの絶対パスを指定してください。
-
-```sh
-H5C_H5FORTRAN_ARTIFACT="$(realpath ../h5fortran/build/serial/test/test-serial.h5)" \
-  ./build/gnu/test/test_crosslang
-```
-
-ファイルを開けない場合、phase E は非致命的に省略されます。
-省略の通知と最終結果の `phase E SKIPPED` を確認してください。
-
-```sh
-ctest --preset my-intel             # 逐次テスト。ログインノードで可
-sbatch scripts/run-mpi-tests.sh     # 並列テスト。バッチ投入のみ
-```
-
-**並列テストはログインノードで実行しないでください。** ランク数に関わらず
-`mpiexec` の起動はバッチ経由です。`mpi` ラベルを `quick` に含めていないのは、
-ログインノードで習慣的に打つコマンドが誤って MPI ジョブを起動しないように
-するためです。
-
-## 未対応の機能
-
-chunking・圧縮と Parallel の文字列 I/O は未対応です。複数次元の同時分割と
-real128 の制約については [FORMAT.md](FORMAT.md) を参照してください。
+メッシュの出力手順は [USAGE-visualization.md](USAGE-visualization.md) を参照してください。
+chunking・圧縮と分散文字列配列の I/O は未対応です。

@@ -1,213 +1,97 @@
-# h5c ファイルフォーマット仕様
+# HDF5 ファイル形式
 
-このドキュメントは **C と Fortran に共通のファイルフォーマット契約**の正本である。
-`h5c` と `h5fortran` は独立した実装だが、ここに書かれたレイアウトを共有することで、
-一方が書いた HDF5 をもう一方が正しく読める。
-
-Fortran API そのものの仕様は `h5fortran/docs/SPEC.md` を参照。
+h5c・h5cpp・h5fortran と h5xdmf が共有する保存形式です。
+C API の呼び方は [USAGE.md](USAGE.md)、可視化の出力手順は
+[USAGE-visualization.md](USAGE-visualization.md) を参照してください。
 
 ## 次元順序
 
-これがもっとも間違えやすい箇所である。
-
-**HDF5 の Fortran ライブラリは dims を反転して記録する。** `h5fortran` は
-`shape(array)` をそのまま `h5screate_simple_f` に渡しているが、ファイル上の
-dataspace は反転した並びになる。実測（`h5fortran` のテスト出力）で確認した結果:
+h5c の `dims` は row-major で、最後の次元が最も高速に変化します。
+Fortran の配列 `a(nx, ny)` に対応する C/C++ の shape は `{ny, nx}` です。
 
 ```text
-Fortran:  real(real64) :: a(2, 3)   ! 値 1..6 を reshape で格納
-ファイル: DATASPACE SIMPLE { ( 3, 2 ) }
-          (0,0): 1, 2
-          (1,0): 3, 4
-          (2,0): 5, 6
+Fortran: real(real64) :: a(2, 3)   ! 値 1..6 を reshape で格納
+HDF5:    shape = (3, 2)
+         (0,0): 1, 2
+         (1,0): 3, 4
+         (2,0): 5, 6
 ```
 
-結果としてファイルは HDF5 公式が推奨する自然な形になっている。したがって **`h5c` は
-転置もコピーも次元反転も行わない**。
-
-| 言語 | 宣言 | 要素アクセス | HDF5 dims |
-|---|---|---|---|
-| Fortran | `a(nx, ny)` | `a(i, j)` | `[ny, nx]` |
-| C / C++ | 平坦バッファ（`nx*ny` 要素） | `a[(j-1)*nx + (i-1)]` | `[ny, nx]` |
-
-`h5c` の `dims` は **row-major**、すなわち `dims[rank-1]` が最も高速に変化する。
-これは HDF5 C API の既定解釈と一致する。
+h5c に渡す配列の添字と shape は次のように対応します。
 
 ```text
-rank 3, dims = {d0, d1, d2}
+dims = {d0, d1, d2}
 flat index = (i0 * d1 + i1) * d2 + i2
 ```
 
-column-major の実行時切り替えは提供しない。転置コピーが必須になり、
-大規模並列 I/O で許容できないためである。
-
 ## データ型
 
-| `h5c_type_t` | ファイル上の型 | メモリ上の型 | Fortran 対応 |
-|---|---|---|---|
-| `H5C_F32` | `H5T_IEEE_F32LE` | `float` | `real(real32)` |
-| `H5C_F64` | `H5T_IEEE_F64LE` | `double` | `real(real64)` |
-| `H5C_I32` | `H5T_STD_I32LE` | `int32_t` | `integer(int32)` |
-| `H5C_I64` | `H5T_STD_I64LE` | `int64_t` | （h5fortran に対応なし） |
-| `H5C_BOOL` | int8 基底の enum | `int8_t` | `logical` |
-| `H5C_STRING` | 固定長 `H5T_C_S1` | `char*` | `character` |
+数値はリトルエンディアンで保存します。
 
-ファイル上の型を明示的にリトルエンディアンにしているのは、
-異なるプラットフォーム間でファイルが再現可能になるようにするためである。
+| h5c の型 | ファイル上の型 |
+|---|---|
+| `H5C_F32` / `H5C_F64` | `H5T_IEEE_F32LE` / `H5T_IEEE_F64LE` |
+| `H5C_I8` / `H5C_I16` | `H5T_STD_I8LE` / `H5T_STD_I16LE` |
+| `H5C_I32` / `H5C_I64` | `H5T_STD_I32LE` / `H5T_STD_I64LE` |
+| `H5C_BOOL` | `H5T_STD_I8LE` 基底の enum（`FALSE=0`, `TRUE=1`） |
+| `H5C_STRING` | 固定長 `H5T_C_S1`（SPACEPAD）。可変長も選択可能 |
 
-### bool
+bool は 1 要素 1 バイトで、h5dump では `TRUE` / `FALSE`、h5py では
+`np.bool_` として読めます。h5fortran の `logical` と相互に読み書きでき、
+h5fortran が整数で保存した logical も h5c で読み込めます。
 
-ファイル上は **int8 を基底とする enum**（`FALSE=0`, `TRUE=1`）とする。
+固定長文字列は h5fortran と相互運用できます。可変長文字列は h5c で読み書き
+できますが、h5fortran では読めません。
 
-```text
-DATATYPE  H5T_ENUM {
-   H5T_STD_I8LE;
-   "FALSE"            0;
-   "TRUE"             1;
-}
-```
-
-- 1 要素 1 バイト。HDF5 の要素はバイト境界に配置されるため、これが下限である
-  （`H5Tset_precision()` で 1 ビット精度を宣言しても要素は 1 バイトを占める）。
-- `h5dump` が `TRUE` / `FALSE` と表示する。
-- h5py が `np.bool_` として読む。これは h5py が numpy の bool を保存するときの
-  表現そのものである。
-- `h5fortran` はこれを `logical` として読める。`h5fort_read_lgc_*` は rank しか
-  検査せず `H5T_NATIVE_INTEGER` で読むため、HDF5 が自動変換する（検証済み）。
-
-`h5fortran` は `logical` を `H5T_STD_I32LE` で書く。`h5c` はこれを `H5C_BOOL`
-として読める。**ただし自動ではない。**
-
-HDF5 は **enum → integer の変換は行うが、integer → enum の変換経路を持たない**
-（実測で確認）。したがって int32 の dataset を bool の enum をメモリ型として
-読もうとすると `H5Dread` が失敗する。そのため `h5c` は次の非対称な扱いをしている。
-
-| 方向 | メモリ型 | ファイル型 |
-|---|---|---|
-| 書き込み | enum | enum（変換なし、memcpy） |
-| 読み込み | `H5T_NATIVE_INT8` | enum でも整数でも可 |
-
-`h5c_bool_t` は `int8_t` なので、読み込みを int8 経由にしても呼び出し側からは
-何も変わらない。この非対称性は「メモリ型を 1 つに揃える」という一見無害な整理で
-壊れるため、`test/test_crosslang.c` が明示的に検査している。
-
-0 / 1 以外の値は検証されずそのまま書かれる。正規化には一時バッファと
-全要素の走査が必要で、速度優先の方針に反するためである。
-
-### 文字列
-
-書き込みの既定は固定長 `H5T_C_S1`（`h5fortran` が読める形式）。読み込みは
-固定長・可変長の両方を受け付ける。可変長で書きたい場合は
-`h5c_write_string_vlen()` を明示的に呼ぶが、`h5fortran` はそれを読めない。
+real128 は h5c では非対応です。その dataset の型を問い合わせると
+`H5C_TYPE_UNKNOWN` になります。
 
 ## 数値配列属性
 
-数値配列属性は長さ `count` の1次元 dataspace に、dataset と同じ
-リトルエンディアンの型で保存する。h5fortran と同じ形式で相互運用できる。
-短い数値ベクトルに使い、大きなデータは dataset にする。
+数値配列属性は長さ `count` の 1 次元 dataspace に、dataset と同じ型で保存します。
+h5fortran と相互運用できます。短い数値ベクトルに使い、大きなデータは dataset にします。
 
 ## Parallel の分割レイアウト
 
-path `P` へ分散配列を書くと **group** ができる。
+パス `P` は group になり、次の dataset を持ちます。
 
 ```text
 P/data             全ランクのデータを分割軸方向に連結したもの
 P/__partition__    ランク境界を表す int64 配列、長さ nprocs + 1
 ```
 
+分割軸はファイル上の第 0 次元（Fortran では最終次元）です。
+複数次元の同時分割は表現しません。
+
 ```text
-__partition__[0]        == 0
-ランク r の開始位置     == __partition__[r]
-ランク r のローカル長   == __partition__[r+1] - __partition__[r]
-全体長                  == __partition__[nprocs]
+__partition__[0]       == 0
+ランク r の開始位置    == __partition__[r]
+ランク r の行数        == __partition__[r+1] - __partition__[r]
+__partition__[nprocs]  == data の第 0 次元の長さ
 ```
 
-値は単調非減少で、ローカル長 0 も表現できる。
+境界は単調非減少で、行数 0 も表現できます。
+担当範囲の取得と読み込み条件は [並列 API](USAGE.md#parallel-io) を参照してください。
 
-**分割軸はファイル上の第 0 次元**である。C では `dims[0]`（最も低速に変化する軸）、
-Fortran では最終次元にあたる。両者は同じファイル軸を指すため、`__partition__` は
-そのまま相互運用できる。
+## 多成分フィールド
 
-分割軸以外の次元は全ランクで一致していなければならない。不一致は HDF5 の
-collective 呼び出しより前に、全ランクで合意した上で拒否される。
+多成分の値は `[n, ncomp]` にインターリーブして保存します。
+Fortran の `field(ncomp, n)` と同じ配置で、XDMF の Vector / Tensor に対応します。
 
-`__partition__` が 1 次元の境界配列である以上、複数次元の同時分割は表現できない。
-
-### partition へのアクセス
-
-`__partition__` を利用者が直接開く必要はない。**レイアウトに手を伸ばさずに済む
-アクセサを用意している。**
-
-| 知りたいこと | 使う関数 |
+| 成分数 | 可視化フィールドの `attribute_type` |
 |---|---|
-| 自分の担当ブロックの開始位置と行数 | `h5c_poffset()` |
-| 全ランクの境界配列 | `h5c_ppartition()` |
-| ローカル・グローバルの形状 | `h5c_pdataset_info()` |
-
-`h5c_pdataset_info()` は形状だけを返し、**開始位置は返さない**。
-そのため以前は `"<path>/__partition__"` を逐次リーダーで開き、group 相対の名前を
-ハードコードするしかなかった。`H5C_PARTITION_NAME` が public なのは、その時期の
-名残りである。新しく書くコードでは `h5c_poffset()` を使う。
-
-いずれも collective であり、`__partition__` の検証は `h5c_pread()` と同一である。
-
-なお **h5cpp は現在 `__partition__` を自前で読んでいる**（`read_replicated()` 経由）。
-これらのアクセサを使うように簡素化できる。
-
-### 読み込み時の検証
-
-読み込み前に以下をすべて検査し、いずれかが破れていればデータを転送せずに失敗する。
-
-- `__partition__` の長さが現在の MPI プロセス数 + 1 と一致する
-- 先頭要素が 0
-- 単調非減少である
-- 最終要素が `data` の第 0 次元の長さと一致する
-
-## 多成分フィールド（ベクトル・テンソル）
-
-ベクトル・テンソル場は **インターリーブして `[n, ncomp]`** で保存する。
-これは XDMF3 の Vector / Tensor attribute が要求する配置であり、ParaView に
-ベクトルとして認識させるために必要である（velocity magnitude の色付けや
-テンソル不変量の計算がこれに依存する）。
-
-`h5fortran` の可視化 writer は `field(ncomp, nlocal)` を受けるが、
-HDF5 Fortran ライブラリの次元反転により、ファイル上は同じ `[n, ncomp]` になる。
-
-| `ncomp` | XDMF `attribute_type` |
-|---|---|
-| 1 | `Scalar` |
+| 1 | `Scalar`（dataset は 1 次元） |
 | 3 | `Vector` |
 | 6 | `Tensor6` |
 | 9 | `Tensor` |
+| その他 | 属性なし |
 
-### テンソル成分の順序
+Tensor6 は ParaView の対称テンソル規約 **`XX, YY, ZZ, XY, YZ, XZ`** の順です。
+h5xdmf は成分を並べ替えません。
 
-`ncomp = 6`（対称3×3）の成分順は、ParaViewの対称テンソル規約に従い
-**`XX, YY, ZZ, XY, YZ, XZ`**とする。これに一致していなければ
-テンソル不変量の計算が壊れる。
+## 可視化レイアウト
 
-`h5fortran/docs/SPEC.md` と `h5xdmf/docs/design.md` も同じ順序を記載している。
-`h5xdmf` は成分を並べ替えず、保存されている列をそのまま参照する。
-
-## 可視化レイアウト（scheme_version = 1）
-
-`h5c_viz.h` の `h5c_viz_open()` と `h5c_viz_mpi.h` の `h5c_viz_popen()` が書く形式。`h5fortran` の `t_phdf5_writer` と同一であり、
-Python の `h5xdmf` がどちらの出力からも XDMF3 を生成する。
-
-この形式は serial / parallel のどちらでも書ける。serial では 1 プロセスの
-ローカル数がそのまま total になり、offset は常に 0 である。parallel では
-各 rank のデータを連結するが、ファイル上のレイアウトは同じである。
-
-`h5c::h5c_serial` は `h5c.h` と `h5c_viz.h` の API、並列構成の
-`h5c::h5c_parallel` は `h5c_mpi.h` と `h5c_viz_mpi.h` の API を提供する。
-`h5c::h5c` は構成に応じて serial または serial + parallel を選ぶ互換ターゲットで、
-並列構成では一つの prefix に両 API が入る。Parallel HDF5 を使う構成では serial
-ターゲットも HDF5 経由で MPI に依存する。詳細は [USAGE.md](USAGE.md) を参照。
-
-二つの open が返す `h5c_viz_t` に対して、以後のメッシュ・データ・属性・close 操作は
-すべて `h5c_viz.h` の共通 API を使う。実装は `src/serial/h5c_viz.c` に一つだけ置き、
-`src/h5c_viz_internal.h` の非公開ハンドルとフックを並列側が共有する。
-
+`scheme_version = 1` の形式です。逐次・並列とも同じ配置になります。
 
 ```text
 /                              attrs: scheme_version=1 (i32), time (f64)
@@ -218,46 +102,10 @@ Python の `h5xdmf` がどちらの出力からも XDMF3 を生成する。
 /<mesh>/cell_data/<field>      (total_cells[, ncomp])
 ```
 
-field には `attribute_type` 属性が付く（`h5fortran` の出力と一致することを実測で確認）。
+各 field の `attribute_type` は [多成分フィールド](#多成分フィールド) に従います。
+connectivity はファイル全体の 0-origin 節点番号です。
+geometry は f32/f64、connectivity は i8/i16/i32/i64、field はこれらの数値型に対応します。
 
-| `ncomp` | `attribute_type` |
-|---|---|
-| 1 | `Scalar`（dataset は 1 次元） |
-| 3 | `Vector` |
-| 6 | `Tensor6`（成分順 `XX, YY, ZZ, XY, YZ, XZ`） |
-| 9 | `Tensor` |
-| その他 | なし（XDMF に名前がないため） |
-
-1 ファイルに複数 mesh を置ける。`h5xdmf` は mesh group ごとに `.xdmf` を出す。
-
-**connectivity はランクローカルな 0-origin で渡し、writer が global ID に変換する。**
-各ランクは自分が所有する cell だけを書く（ghost cell を書くと重複する）。
-node は cell が参照する全ローカル node を含み、ランク境界での重複は許容される。
-このため呼び出し側に node 番号の統合通信は不要である。
-
-geometry は f32/f64、connectivity は i8/i16/i32/i64、field はそれらすべてに対応する。
-`h5fortran` は real128 にも対応するが、**`h5c` は対応しない**。Fortran の real128 は
-IEEE binary128 で、C では `long double` ではなく `__float128`（コンパイラ拡張）が
-必要になるためである。real128 の dataset は `H5C_TYPE_UNKNOWN` として読まれる。
-
-## 製品バージョンと scheme
-
-製品バージョンは `h5c` / `h5fortran` / `h5cpp` で独立した SemVer とする。
-共有するのはこのフォーマット契約だけである。
-
-`H5C_SCHEME_VERSION`（`h5c_version.h`）は製品バージョンから独立した
-1 とする。**reader はこの値を仮定せず、対象ファイルの `scheme_version` 属性を
-読んで判断する。**
-
-## 相互運用の検証方法
-
-参照 `.h5` ファイルはリポジトリに含めない。代わりに、**`h5c` を一切使わず
-素の HDF5 C API だけで参照ファイルを組み立てるプログラム**をテストに含め、
-実行時に生成する。逆方向は参照 reader が `h5c` の出力の dataspace 次元と
-バイト列を直接検査する。
-
-こうすることで差分の読めないバイナリを版管理せずに済み、しかも期待値が
-ソースコードとして明示されるため、この文書の実行可能な裏付けになる。
-
-テストデータは**転置しても区別がつくもの**を使う。対称な形状（`2×2`）や
-対称な値は、次元順序を間違えても偶然一致してしまうため使わない。
+1 ファイルに複数 mesh を保存できます。h5xdmf は mesh ごとに XDMF を生成します。
+`scheme_version` はライブラリの製品バージョンとは独立しています。
+ファイルを読む際は root の `scheme_version` 属性で形式を確認してください。
