@@ -75,7 +75,6 @@ h5c_viz_popen("result/seq000000.h5", t, MPI_COMM_WORLD, MPI_INFO_NULL, &viz);
 `h5c_viz_status()` はローカルな参照です。
 `h5c_viz_offsets()` で現在のメッシュの point / cell offset を取得できます。
 communicator は close まで有効に保ち、MPI は close 後に終了してください。
-MPI プログラムの実行はジョブスクリプトから行ってください。
 
 ## 後処理
 

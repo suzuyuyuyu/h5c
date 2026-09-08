@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(h5c
-    VERSION 0.1.1
+    VERSION 2.0.0
     DESCRIPTION "Compact C wrapper around the HDF5 C API"
     LANGUAGES C
 )
