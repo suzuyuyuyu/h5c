@@ -5,38 +5,34 @@
  * attributes, then read back by asking for the shape first.
  */
 #include <h5c/h5c.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 
 /* Reports the recorded message, which says more than the status alone. */
-static int failed(const char *what, h5c_status_t st)
-{
+static int failed(const char* what, h5c_status_t st) {
     if (st == H5C_OK) {
         return 0;
     }
-    fprintf(stderr, "%s: %s (%s)\n", what, h5c_status_string(st),
-            h5c_last_error()->message);
+    fprintf(stderr, "%s: %s (%s)\n", what, h5c_status_string(st), h5c_last_error()->message);
     return 1;
 }
 
-int main(void)
-{
-    const char *path = "example_serial.h5";
+int main(void) {
+    const char* path = "example_serial.h5";
 
     /* dims are ROW-MAJOR: the last one varies fastest.
        This is the C view of what Fortran declares as a(2, 3). */
-    const double values[6] = { 1, 2, 3, 4, 5, 6 };
-    const size_t dims[2]   = { 3, 2 };
+    const double values[6] = {1, 2, 3, 4, 5, 6};
+    const size_t dims[2] = {3, 2};
 
-    const h5c_bool_t flags[4] = { H5C_TRUE, H5C_FALSE, H5C_FALSE, H5C_TRUE };
-    const size_t     fdims[2] = { 2, 2 };
+    const h5c_bool_t flags[4] = {H5C_TRUE, H5C_FALSE, H5C_FALSE, H5C_TRUE};
+    const size_t fdims[2] = {2, 2};
 
-    h5c_file_t         *f = NULL;
-    h5c_dataset_info_t  info;
-    double             *got = NULL;
-    char               *units = NULL;
-    size_t              i;
+    h5c_file_t* f = NULL;
+    h5c_dataset_info_t info;
+    double* got = NULL;
+    char* units = NULL;
+    size_t i;
 
     /* ---- write ---------------------------------------------------- */
 
@@ -77,17 +73,14 @@ int main(void)
         h5c_close(f);
         return 1;
     }
-    printf("/mesh/coords: rank=%d dims={%lu, %lu} count=%lu\n",
-           info.rank, (unsigned long)info.dims[0],
-           (unsigned long)info.dims[1], (unsigned long)info.count);
+    printf("/mesh/coords: rank=%d dims={%lu, %lu} count=%lu\n", info.rank, (unsigned long)info.dims[0], (unsigned long)info.dims[1], (unsigned long)info.count);
 
-    got = (double *)malloc(info.count * sizeof *got);
+    got = (double*)malloc(info.count * sizeof *got);
     if (got == NULL) {
         h5c_close(f);
         return 1;
     }
-    if (failed("read", h5c_read_f64(f, "/mesh/coords", got,
-                                    info.rank, info.dims))) {
+    if (failed("read", h5c_read_f64(f, "/mesh/coords", got, info.rank, info.dims))) {
         free(got);
         h5c_close(f);
         return 1;
@@ -110,7 +103,7 @@ int main(void)
         double unused = 0.0;
         h5c_status_t st = h5c_read_f64_scalar(f, "/not/here", &unused);
         printf("missing dataset -> %s\n", h5c_status_string(st));
-        h5c_file_clear_status(f);   /* we handled it; drop it from the file */
+        h5c_file_clear_status(f); /* we handled it; drop it from the file */
     }
 
     h5c_close(f);

@@ -2,54 +2,53 @@
 #ifndef H5C_INTERNAL_H
 #define H5C_INTERNAL_H
 
-#include "h5c/h5c.h"
-
 #include <hdf5.h>
-
 #include <stdio.h>
 
+#include "h5c/h5c.h"
+
 #if defined(__cplusplus)
-#  define H5C_THREAD_LOCAL thread_local
+#define H5C_THREAD_LOCAL thread_local
 #elif defined(_MSC_VER)
-#  define H5C_THREAD_LOCAL __declspec(thread)
+#define H5C_THREAD_LOCAL __declspec(thread)
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
-#  define H5C_THREAD_LOCAL _Thread_local
+#define H5C_THREAD_LOCAL _Thread_local
 #elif defined(__GNUC__)
-#  define H5C_THREAD_LOCAL __thread
+#define H5C_THREAD_LOCAL __thread
 #else
-#  define H5C_THREAD_LOCAL /* single-threaded fallback */
+#define H5C_THREAD_LOCAL /* single-threaded fallback */
 #endif
 
 struct h5c_file {
-    hid_t        fid;
-    h5c_status_t sticky;   /* first non-OK status seen on this file */
-    int          borrowed; /* 1 when fid is owned by the caller */
-    int          readonly;
-    int          parallel;
+    hid_t fid;
+    h5c_status_t sticky; /* first non-OK status seen on this file */
+    int borrowed;        /* 1 when fid is owned by the caller */
+    int readonly;
+    int parallel;
 };
 
-#define H5C_STATUS_MESSAGES { \
-    [H5C_OK] = "ok", \
-    [H5C_ERR_INVALID_ARG] = "invalid argument", \
-    [H5C_ERR_NOT_FOUND] = "not found", \
+#define H5C_STATUS_MESSAGES {                    \
+    [H5C_OK] = "ok",                             \
+    [H5C_ERR_INVALID_ARG] = "invalid argument",  \
+    [H5C_ERR_NOT_FOUND] = "not found",           \
     [H5C_ERR_SHAPE_MISMATCH] = "shape mismatch", \
-    [H5C_ERR_TYPE_MISMATCH] = "type mismatch", \
-    [H5C_ERR_EXISTS] = "already exists", \
-    [H5C_ERR_HDF5] = "HDF5 error", \
-    [H5C_ERR_MPI] = "MPI error", \
-    [H5C_ERR_NOMEM] = "out of memory", \
-    [H5C_ERR_STATE] = "invalid state", \
-    [H5C_ERR_UNSUPPORTED] = "unsupported", \
+    [H5C_ERR_TYPE_MISMATCH] = "type mismatch",   \
+    [H5C_ERR_EXISTS] = "already exists",         \
+    [H5C_ERR_HDF5] = "HDF5 error",               \
+    [H5C_ERR_MPI] = "MPI error",                 \
+    [H5C_ERR_NOMEM] = "out of memory",           \
+    [H5C_ERR_STATE] = "invalid state",           \
+    [H5C_ERR_UNSUPPORTED] = "unsupported",       \
 }
 
 /* Records `status` with a printf-style message and returns `status`. */
-h5c_status_t h5c__fail(h5c_status_t status, const char *fmt, ...);
+h5c_status_t h5c__fail(h5c_status_t status, const char* fmt, ...);
 
 /* As above, but also stores the raw HDF5 error code. */
-h5c_status_t h5c__fail_hdf5(long herr, const char *fmt, ...);
+h5c_status_t h5c__fail_hdf5(long herr, const char* fmt, ...);
 
 /* Folds `status` into the file's sticky error and returns it unchanged. */
-h5c_status_t h5c__record(h5c_file_t *file, h5c_status_t status);
+h5c_status_t h5c__record(h5c_file_t* file, h5c_status_t status);
 
 /* Ensures the library is initialised. Safe to call repeatedly. */
 h5c_status_t h5c__ensure_init(void);
@@ -89,21 +88,19 @@ hid_t h5c__lcpl(void);
 /* dataset helpers, shared with the other translation units */
 
 /* Validates a file handle, path, rank and dims. */
-h5c_status_t h5c__check_common(h5c_file_t *file, const char *path,
-                               int rank, const size_t *dims);
+h5c_status_t h5c__check_common(h5c_file_t* file, const char* path, int rank, const size_t* dims);
 
 /* Dataspace for rank/dims; rank 0 yields a scalar space. Caller closes it. */
-hid_t h5c__make_space(int rank, const size_t *dims);
+hid_t h5c__make_space(int rank, const size_t* dims);
 
 /* Product of dims; 1 for rank 0. Zero when any extent is zero. */
-size_t h5c__count(int rank, const size_t *dims);
+size_t h5c__count(int rank, const size_t* dims);
 
 /* Fills `out` from an already-open dataset id. */
-h5c_status_t h5c__info_from_dset(hid_t did, h5c_dataset_info_t *out);
+h5c_status_t h5c__info_from_dset(hid_t did, h5c_dataset_info_t* out);
 
 /* Compares a stored shape against rank/dims, reporting a useful message. */
-h5c_status_t h5c__shape_equals(const h5c_dataset_info_t *info,
-                               const char *path, int rank, const size_t *dims);
+h5c_status_t h5c__shape_equals(const h5c_dataset_info_t* info, const char* path, int rank, const size_t* dims);
 
 /*
  * The buffer-level half of the interleaved API, implemented once in
@@ -119,11 +116,9 @@ h5c_status_t h5c__shape_equals(const h5c_dataset_info_t *info,
 size_t h5c__tile_rows(size_t n, size_t row_bytes);
 
 /* Gathers rows [row0, row0+rows) of every component into `dst`. */
-void h5c__pack_tile(char *dst, const void *const *comps, size_t ncomp,
-                    size_t row0, size_t rows, size_t esize);
+void h5c__pack_tile(char* dst, const void* const* comps, size_t ncomp, size_t row0, size_t rows, size_t esize);
 
 /* Scatters rows [row0, row0+rows) of `src` back into the components. */
-void h5c__unpack_tile(const char *src, void *const *comps, size_t ncomp,
-                      size_t row0, size_t rows, size_t esize);
+void h5c__unpack_tile(const char* src, void* const* comps, size_t ncomp, size_t row0, size_t rows, size_t esize);
 
 #endif /* H5C_INTERNAL_H */

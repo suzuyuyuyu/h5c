@@ -5,12 +5,11 @@
  * places where this deliberately differs from h5fortran are marked with
  * "DELIBERATE:" comments below.
  */
-#include "h5c_internal.h"
-
-#include "h5c/h5c_mpi.h"
-
 #include <stdlib.h>
 #include <string.h>
+
+#include "h5c/h5c_mpi.h"
+#include "h5c_internal.h"
 
 /* Name of the payload dataset inside the group written for a path. */
 #define DATA_NAME "data"
@@ -21,9 +20,8 @@ typedef struct {
     int collective;
 } parallel_file;
 
-static parallel_file *pfile(const h5c_file_t *file)
-{
-    return (parallel_file *)file;
+static parallel_file* pfile(const h5c_file_t* file) {
+    return (parallel_file*)file;
 }
 
 /*
@@ -33,11 +31,10 @@ static parallel_file *pfile(const h5c_file_t *file)
  * The enum is append-only and ordered with H5C_OK == 0, so MAX picks a real
  * failure over success.
  */
-static h5c_status_t agree(MPI_Comm comm, h5c_status_t local)
-{
+static h5c_status_t agree(MPI_Comm comm, h5c_status_t local) {
     int mine, worst;
 
-    mine  = (int)local;
+    mine = (int)local;
     worst = mine;
     if (MPI_Allreduce(&mine, &worst, 1, MPI_INT, MPI_MAX, comm) != MPI_SUCCESS) {
         return h5c__fail(H5C_ERR_MPI, "MPI_Allreduce failed agreeing on status");
@@ -48,20 +45,16 @@ static h5c_status_t agree(MPI_Comm comm, h5c_status_t local)
     if (local != H5C_OK) {
         return local; /* keep this rank's own, more specific message */
     }
-    return h5c__fail((h5c_status_t)worst,
-                     "another rank reported '%s'; failing collectively",
-                     h5c_status_string((h5c_status_t)worst));
+    return h5c__fail((h5c_status_t)worst, "another rank reported '%s'; failing collectively", h5c_status_string((h5c_status_t)worst));
 }
 
 /* Validates that `file` was opened through the parallel entry points. */
-static h5c_status_t pfile_check(h5c_file_t *file)
-{
+static h5c_status_t pfile_check(h5c_file_t* file) {
     if (file == NULL || file->fid < 0) {
         return h5c__fail(H5C_ERR_INVALID_ARG, "file handle is NULL or closed");
     }
     if (!file->parallel) {
-        return h5c__fail(H5C_ERR_STATE,
-                         "file was not opened with h5c_popen()");
+        return h5c__fail(H5C_ERR_STATE, "file was not opened with h5c_popen()");
     }
     return H5C_OK;
 }
@@ -75,9 +68,7 @@ static h5c_status_t pfile_check(h5c_file_t *file)
  * cross-rank agreement of rank and dims[1..] is collective and lives in
  * agree_shape().
  */
-static h5c_status_t pcheck_args(h5c_file_t *file, const char *path,
-                                int rank, const size_t *dims)
-{
+static h5c_status_t pcheck_args(h5c_file_t* file, const char* path, int rank, const size_t* dims) {
     h5c_status_t st;
 
     if ((st = pfile_check(file)) != H5C_OK) {
@@ -89,7 +80,8 @@ static h5c_status_t pcheck_args(h5c_file_t *file, const char *path,
     if (rank < 1) {
         return h5c__fail(H5C_ERR_INVALID_ARG,
                          "rank %d is invalid for '%s': "
-                         "a scalar has no axis to split", rank, path);
+                         "a scalar has no axis to split",
+                         rank, path);
     }
     return H5C_OK;
 }
@@ -99,13 +91,11 @@ static h5c_status_t pcheck_args(h5c_file_t *file, const char *path,
  * Checked with MPI_Allreduce MIN/MAX (as h5fortran does) so the verdict is
  * already the same everywhere and no further agreement is needed.
  */
-static h5c_status_t agree_shape(MPI_Comm comm, const char *path,
-                                int rank, const size_t *dims)
-{
+static h5c_status_t agree_shape(MPI_Comm comm, const char* path, int rank, const size_t* dims) {
     int64_t mine[H5C_MAX_RANK + 1];
     int64_t lo[H5C_MAX_RANK + 1];
     int64_t hi[H5C_MAX_RANK + 1];
-    int     n, i;
+    int n, i;
 
     /*
      * A fixed count keeps the reduction well defined even when the ranks
@@ -123,14 +113,10 @@ static h5c_status_t agree_shape(MPI_Comm comm, const char *path,
 
     if (MPI_Allreduce(mine, lo, n, MPI_INT64_T, MPI_MIN, comm) != MPI_SUCCESS ||
         MPI_Allreduce(mine, hi, n, MPI_INT64_T, MPI_MAX, comm) != MPI_SUCCESS) {
-        return h5c__fail(H5C_ERR_MPI,
-                         "MPI_Allreduce failed checking the shape of '%s'",
-                         path);
+        return h5c__fail(H5C_ERR_MPI, "MPI_Allreduce failed checking the shape of '%s'", path);
     }
     if (lo[0] != hi[0]) {
-        return h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                         "'%s': rank differs across ranks (%ld..%ld)",
-                         path, (long)lo[0], (long)hi[0]);
+        return h5c__fail(H5C_ERR_SHAPE_MISMATCH, "'%s': rank differs across ranks (%ld..%ld)", path, (long)lo[0], (long)hi[0]);
     }
     for (i = 1; i < n; i++) {
         if (lo[i] != hi[i]) {
@@ -144,8 +130,7 @@ static h5c_status_t agree_shape(MPI_Comm comm, const char *path,
 }
 
 /* Dataset transfer property list honouring the file's collective flag. */
-static hid_t make_dxpl(const h5c_file_t *file)
-{
+static hid_t make_dxpl(const h5c_file_t* file) {
     hid_t xfer;
 
     xfer = H5Pcreate(H5P_DATASET_XFER);
@@ -153,8 +138,7 @@ static hid_t make_dxpl(const h5c_file_t *file)
         h5c__fail_hdf5((long)xfer, "H5Pcreate(H5P_DATASET_XFER) failed");
         return H5I_INVALID_HID;
     }
-    if (H5Pset_dxpl_mpio(xfer, pfile(file)->collective ? H5FD_MPIO_COLLECTIVE
-                                                : H5FD_MPIO_INDEPENDENT) < 0) {
+    if (H5Pset_dxpl_mpio(xfer, pfile(file)->collective ? H5FD_MPIO_COLLECTIVE : H5FD_MPIO_INDEPENDENT) < 0) {
         H5Pclose(xfer);
         h5c__fail_hdf5(-1, "H5Pset_dxpl_mpio failed");
         return H5I_INVALID_HID;
@@ -169,14 +153,12 @@ static hid_t make_dxpl(const h5c_file_t *file)
  * BOTH spaces) instead of a zero-length hyperslab, whose handling varies
  * between HDF5 and MPI-IO versions. The rank still joins the collective call.
  */
-static h5c_status_t select_block(hid_t fsid, int rank, const size_t *dims,
-                                 size_t offset, hid_t *msid_out)
-{
+static h5c_status_t select_block(hid_t fsid, int rank, const size_t* dims, size_t offset, hid_t* msid_out) {
     hsize_t start[H5C_MAX_RANK];
     hsize_t count[H5C_MAX_RANK];
     hsize_t mdims[H5C_MAX_RANK];
-    hid_t   msid;
-    int     i;
+    hid_t msid;
+    int i;
 
     *msid_out = H5I_INVALID_HID;
 
@@ -198,8 +180,7 @@ static h5c_status_t select_block(hid_t fsid, int rank, const size_t *dims,
             H5Sclose(msid);
             return h5c__fail_hdf5(-1, "H5Sselect_none failed");
         }
-    } else if (H5Sselect_hyperslab(fsid, H5S_SELECT_SET, start, NULL,
-                                   count, NULL) < 0) {
+    } else if (H5Sselect_hyperslab(fsid, H5S_SELECT_SET, start, NULL, count, NULL) < 0) {
         H5Sclose(msid);
         return h5c__fail_hdf5(-1, "H5Sselect_hyperslab failed");
     }
@@ -218,12 +199,12 @@ static h5c_status_t select_block(hid_t fsid, int rank, const size_t *dims,
  * `ntiles` is AGREED ACROSS RANKS, see agree_tiles().
  */
 typedef struct {
-    void *const *comps;  /* borrowed; the write path const-casts into this */
-    size_t       ncomp;
-    size_t       esize;
-    char        *stage;
-    size_t       rows;   /* rows per tile; 0 when this rank owns no rows */
-    long long    ntiles; /* identical on every rank */
+    void* const* comps; /* borrowed; the write path const-casts into this */
+    size_t ncomp;
+    size_t esize;
+    char* stage;
+    size_t rows;      /* rows per tile; 0 when this rank owns no rows */
+    long long ntiles; /* identical on every rank */
 } tile_plan_t;
 
 /*
@@ -234,18 +215,14 @@ typedef struct {
  * call, with an empty selection (see select_tile). The floor of 1 keeps one
  * collective transfer even when no rank owns anything.
  */
-static h5c_status_t agree_tiles(MPI_Comm comm, size_t n, size_t rows,
-                                long long *ntiles)
-{
+static h5c_status_t agree_tiles(MPI_Comm comm, size_t n, size_t rows, long long* ntiles) {
     long long mine, most;
 
     mine = (rows > 0) ? (long long)((n + rows - 1) / rows) : 0;
     most = mine;
-    if (MPI_Allreduce(&mine, &most, 1, MPI_LONG_LONG, MPI_MAX,
-                      comm) != MPI_SUCCESS) {
+    if (MPI_Allreduce(&mine, &most, 1, MPI_LONG_LONG, MPI_MAX, comm) != MPI_SUCCESS) {
         *ntiles = 1;
-        return h5c__fail(H5C_ERR_MPI,
-                         "MPI_Allreduce failed agreeing on the tile count");
+        return h5c__fail(H5C_ERR_MPI, "MPI_Allreduce failed agreeing on the tile count");
     }
     *ntiles = (most < 1) ? 1 : most;
     return H5C_OK;
@@ -256,11 +233,9 @@ static h5c_status_t agree_tiles(MPI_Comm comm, size_t n, size_t rows,
  * contiguous memory space. `rows == 0` selects nothing at all on both spaces,
  * exactly as select_block() does for an empty local block.
  */
-static h5c_status_t select_tile(hid_t fsid, size_t grow0, size_t rows,
-                                size_t ncomp, hid_t *msid_out)
-{
+static h5c_status_t select_tile(hid_t fsid, size_t grow0, size_t rows, size_t ncomp, hid_t* msid_out) {
     hsize_t start[2], count[2], mdims[2];
-    hid_t   msid;
+    hid_t msid;
 
     *msid_out = H5I_INVALID_HID;
 
@@ -281,8 +256,7 @@ static h5c_status_t select_tile(hid_t fsid, size_t grow0, size_t rows,
         start[1] = 0;
         count[0] = (hsize_t)rows;
         count[1] = (hsize_t)ncomp;
-        if (H5Sselect_hyperslab(fsid, H5S_SELECT_SET, start, NULL,
-                                count, NULL) < 0) {
+        if (H5Sselect_hyperslab(fsid, H5S_SELECT_SET, start, NULL, count, NULL) < 0) {
             H5Sclose(msid);
             return h5c__fail_hdf5(-1, "cannot select tile rows");
         }
@@ -296,27 +270,22 @@ static h5c_status_t select_tile(hid_t fsid, size_t grow0, size_t rows,
  * transfer each. A transfer error is remembered but does NOT leave the loop:
  * every rank must issue the same number of collective calls.
  */
-static h5c_status_t transfer_tiles(hid_t did, hid_t fsid, hid_t mtype,
-                                   hid_t xfer, const char *path, size_t n,
-                                   size_t offset, const tile_plan_t *plan,
-                                   int writing)
-{
+static h5c_status_t transfer_tiles(hid_t did, hid_t fsid, hid_t mtype, hid_t xfer, const char* path, size_t n, size_t offset, const tile_plan_t* plan, int writing) {
     h5c_status_t st = H5C_OK;
-    char         dummy = 0;
-    long long    t;
+    char dummy = 0;
+    long long t;
 
     for (t = 0; t < plan->ntiles; t++) {
         size_t row0 = (size_t)t * plan->rows;
         size_t rows = 0;
-        char  *buf;
-        hid_t  msid;
+        char* buf;
+        hid_t msid;
 
         if (plan->rows > 0 && row0 < n) {
             rows = (n - row0 < plan->rows) ? (n - row0) : plan->rows;
         }
         {
-            h5c_status_t sel = select_tile(fsid, offset + row0, rows,
-                                          plan->ncomp, &msid);
+            h5c_status_t sel = select_tile(fsid, offset + row0, rows, plan->ncomp, &msid);
             if (sel != H5C_OK) {
                 /* Unreachable in practice; nothing is left to select. */
                 return sel;
@@ -325,33 +294,33 @@ static h5c_status_t transfer_tiles(hid_t did, hid_t fsid, hid_t mtype,
         buf = (plan->stage != NULL) ? plan->stage : &dummy;
 
         if (writing) {
-            h5c__pack_tile(buf, (const void *const *)plan->comps, plan->ncomp,
-                           row0, rows, plan->esize);
+            h5c__pack_tile(buf, (const void* const*)plan->comps, plan->ncomp, row0, rows, plan->esize);
             if (H5Dwrite(did, mtype, msid, fsid, xfer, buf) < 0 &&
                 st == H5C_OK) {
-                st = h5c__fail_hdf5(-1, "H5Dwrite failed for tile %lld of "
-                                    "'%s/" DATA_NAME "'", t, path);
+                st = h5c__fail_hdf5(-1,
+                                    "H5Dwrite failed for tile %lld of "
+                                    "'%s/" DATA_NAME "'",
+                                    t, path);
             }
         } else if (H5Dread(did, mtype, msid, fsid, xfer, buf) < 0) {
             if (st == H5C_OK) {
-                st = h5c__fail_hdf5(-1, "H5Dread failed for tile %lld of "
-                                    "'%s/" DATA_NAME "'", t, path);
+                st = h5c__fail_hdf5(-1,
+                                    "H5Dread failed for tile %lld of "
+                                    "'%s/" DATA_NAME "'",
+                                    t, path);
             }
         } else {
-            h5c__unpack_tile(buf, plan->comps, plan->ncomp, row0, rows,
-                             plan->esize);
+            h5c__unpack_tile(buf, plan->comps, plan->ncomp, row0, rows, plan->esize);
         }
         H5Sclose(msid);
     }
     return st;
 }
 
-h5c_status_t h5c_popen_comm(const char *path, h5c_mode_t mode,
-                            MPI_Comm comm, MPI_Info info, h5c_file_t **out)
-{
+h5c_status_t h5c_popen_comm(const char* path, h5c_mode_t mode, MPI_Comm comm, MPI_Info info, h5c_file_t** out) {
     h5c_status_t st;
-    h5c_file_t  *file;
-    hid_t        fapl, fid;
+    h5c_file_t* file;
+    hid_t fapl, fid;
 
     if (out == NULL) {
         return h5c__fail(H5C_ERR_INVALID_ARG, "h5c_popen: out is NULL");
@@ -364,8 +333,7 @@ h5c_status_t h5c_popen_comm(const char *path, h5c_mode_t mode,
         return h5c__fail(H5C_ERR_INVALID_ARG, "h5c_popen: MPI_COMM_NULL");
     }
     if (mode != H5C_READ && mode != H5C_READWRITE && mode != H5C_TRUNCATE) {
-        return h5c__fail(H5C_ERR_INVALID_ARG, "h5c_popen: bad mode %d",
-                         (int)mode);
+        return h5c__fail(H5C_ERR_INVALID_ARG, "h5c_popen: bad mode %d", (int)mode);
     }
     if ((st = h5c__ensure_init()) != H5C_OK) {
         return st;
@@ -381,48 +349,44 @@ h5c_status_t h5c_popen_comm(const char *path, h5c_mode_t mode,
     }
 
     switch (mode) {
-    case H5C_TRUNCATE:
-        fid = H5Fcreate(path, H5F_ACC_TRUNC, H5P_DEFAULT, fapl);
-        break;
-    case H5C_READ:
-        fid = H5Fopen(path, H5F_ACC_RDONLY, fapl);
-        break;
-    default:
-        fid = H5Fopen(path, H5F_ACC_RDWR, fapl);
-        break;
+        case H5C_TRUNCATE:
+            fid = H5Fcreate(path, H5F_ACC_TRUNC, H5P_DEFAULT, fapl);
+            break;
+        case H5C_READ:
+            fid = H5Fopen(path, H5F_ACC_RDONLY, fapl);
+            break;
+        default:
+            fid = H5Fopen(path, H5F_ACC_RDWR, fapl);
+            break;
     }
     H5Pclose(fapl);
 
     if (fid < 0) {
-        return h5c__fail_hdf5((long)fid,
-                              "cannot open '%s' in parallel (mode %d)",
-                              path, (int)mode);
+        return h5c__fail_hdf5((long)fid, "cannot open '%s' in parallel (mode %d)", path, (int)mode);
     }
 
-    file = (h5c_file_t *)calloc(1, sizeof(parallel_file));
+    file = (h5c_file_t*)calloc(1, sizeof(parallel_file));
     if (file == NULL) {
         H5Fclose(fid);
         return h5c__fail(H5C_ERR_NOMEM, "h5c_popen: allocation failed");
     }
-    file->fid        = fid;
-    file->sticky     = H5C_OK;
-    file->borrowed   = 0;
-    file->readonly   = (mode == H5C_READ);
-    file->parallel   = 1;
-    pfile(file)->collective = 1;  /* h5c never changes this implicitly */
-    pfile(file)->comm       = comm;  /* borrowed; valid until h5c_close() */
+    file->fid = fid;
+    file->sticky = H5C_OK;
+    file->borrowed = 0;
+    file->readonly = (mode == H5C_READ);
+    file->parallel = 1;
+    pfile(file)->collective = 1; /* h5c never changes this implicitly */
+    pfile(file)->comm = comm;    /* borrowed; valid until h5c_close() */
 
     *out = file;
     return H5C_OK;
 }
 
-h5c_status_t h5c_popen(const char *path, h5c_mode_t mode, h5c_file_t **out)
-{
+h5c_status_t h5c_popen(const char* path, h5c_mode_t mode, h5c_file_t** out) {
     return h5c_popen_comm(path, mode, MPI_COMM_WORLD, MPI_INFO_NULL, out);
 }
 
-h5c_status_t h5c_pset_collective(h5c_file_t *file, int collective)
-{
+h5c_status_t h5c_pset_collective(h5c_file_t* file, int collective) {
     h5c_status_t st;
 
     if ((st = pfile_check(file)) != H5C_OK) {
@@ -432,16 +396,14 @@ h5c_status_t h5c_pset_collective(h5c_file_t *file, int collective)
     return H5C_OK;
 }
 
-int h5c_pis_collective(const h5c_file_t *file)
-{
+int h5c_pis_collective(const h5c_file_t* file) {
     if (file == NULL || !file->parallel) {
         return 0;
     }
     return pfile(file)->collective;
 }
 
-MPI_Comm h5c_pcomm(const h5c_file_t *file)
-{
+MPI_Comm h5c_pcomm(const h5c_file_t* file) {
     if (file == NULL || !file->parallel) {
         return MPI_COMM_NULL;
     }
@@ -454,12 +416,10 @@ MPI_Comm h5c_pcomm(const h5c_file_t *file)
  * the whole vector already, but writing it this way keeps every rank inside
  * the collective call.
  */
-static h5c_status_t write_partition(hid_t gid, const int64_t *part,
-                                    int me, int nprocs, hid_t xfer)
-{
+static h5c_status_t write_partition(hid_t gid, const int64_t* part, int me, int nprocs, hid_t xfer) {
     hsize_t fdims[1], mdims[1], start[1], count[1];
-    hid_t   fsid, msid, did;
-    herr_t  err;
+    hid_t fsid, msid, did;
+    herr_t err;
 
     fdims[0] = (hsize_t)(nprocs + 1);
     if (me == 0) {
@@ -475,30 +435,25 @@ static h5c_status_t write_partition(hid_t gid, const int64_t *part,
     if (fsid < 0) {
         return h5c__fail_hdf5((long)fsid, "cannot build the partition space");
     }
-    did = H5Dcreate2(gid, H5C_PARTITION_NAME, H5T_STD_I64LE, fsid,
-                     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    did = H5Dcreate2(gid, H5C_PARTITION_NAME, H5T_STD_I64LE, fsid, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
     if (did < 0) {
         H5Sclose(fsid);
-        return h5c__fail_hdf5((long)did,
-                              "cannot create " H5C_PARTITION_NAME);
+        return h5c__fail_hdf5((long)did, "cannot create " H5C_PARTITION_NAME);
     }
     msid = H5Screate_simple(1, mdims, NULL);
     if (msid < 0) {
         H5Dclose(did);
         H5Sclose(fsid);
-        return h5c__fail_hdf5((long)msid,
-                              "cannot build the partition memory space");
+        return h5c__fail_hdf5((long)msid, "cannot build the partition memory space");
     }
-    if (H5Sselect_hyperslab(fsid, H5S_SELECT_SET, start, NULL,
-                            count, NULL) < 0) {
+    if (H5Sselect_hyperslab(fsid, H5S_SELECT_SET, start, NULL, count, NULL) < 0) {
         H5Sclose(msid);
         H5Dclose(did);
         H5Sclose(fsid);
         return h5c__fail_hdf5(-1, "cannot select the partition slab");
     }
 
-    err = H5Dwrite(did, H5T_NATIVE_INT64, msid, fsid, xfer,
-                   (me == 0) ? &part[0] : &part[me + 1]);
+    err = H5Dwrite(did, H5T_NATIVE_INT64, msid, fsid, xfer, (me == 0) ? &part[0] : &part[me + 1]);
 
     H5Sclose(msid);
     H5Dclose(did);
@@ -511,18 +466,15 @@ static h5c_status_t write_partition(hid_t gid, const int64_t *part,
 }
 
 /* Reads and validates __partition__. `data_rows` is the extent of data[0]. */
-static h5c_status_t read_partition(hid_t gid, int nprocs, int64_t *part,
-                                   size_t data_rows)
-{
+static h5c_status_t read_partition(hid_t gid, int nprocs, int64_t* part, size_t data_rows) {
     h5c_dataset_info_t info;
-    h5c_status_t       st;
-    hid_t              did;
-    int                r;
+    h5c_status_t st;
+    hid_t did;
+    int r;
 
     did = H5Dopen2(gid, H5C_PARTITION_NAME, H5P_DEFAULT);
     if (did < 0) {
-        return h5c__fail(H5C_ERR_NOT_FOUND,
-                         "no " H5C_PARTITION_NAME " beside the data");
+        return h5c__fail(H5C_ERR_NOT_FOUND, "no " H5C_PARTITION_NAME " beside the data");
     }
     if ((st = h5c__info_from_dset(did, &info)) != H5C_OK) {
         H5Dclose(did);
@@ -530,36 +482,32 @@ static h5c_status_t read_partition(hid_t gid, int nprocs, int64_t *part,
     }
     if (info.rank != 1 || info.dims[0] != (size_t)(nprocs + 1)) {
         H5Dclose(did);
-        return h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                         H5C_PARTITION_NAME " has %lu entries, expected %d "
+        return h5c__fail(H5C_ERR_SHAPE_MISMATCH, H5C_PARTITION_NAME
+                         " has %lu entries, expected %d "
                          "(one per rank plus one)",
-                         (unsigned long)((info.rank == 1) ? info.dims[0] : 0),
-                         nprocs + 1);
+                         (unsigned long)((info.rank == 1) ? info.dims[0] : 0), nprocs + 1);
     }
     /* Independent metadata-sized read; every rank needs the whole vector. */
-    if (H5Dread(did, H5T_NATIVE_INT64, H5S_ALL, H5S_ALL,
-                H5P_DEFAULT, part) < 0) {
+    if (H5Dread(did, H5T_NATIVE_INT64, H5S_ALL, H5S_ALL, H5P_DEFAULT, part) < 0) {
         H5Dclose(did);
         return h5c__fail_hdf5(-1, "H5Dread failed for " H5C_PARTITION_NAME);
     }
     H5Dclose(did);
 
     if (part[0] != 0) {
-        return h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                         H5C_PARTITION_NAME "[0] is %ld, expected 0",
-                         (long)part[0]);
+        return h5c__fail(H5C_ERR_SHAPE_MISMATCH, H5C_PARTITION_NAME "[0] is %ld, expected 0", (long)part[0]);
     }
     for (r = 0; r < nprocs; r++) {
         if (part[r + 1] < part[r]) {
-            return h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                             H5C_PARTITION_NAME " decreases at %d "
-                             "(%ld then %ld)", r + 1,
-                             (long)part[r], (long)part[r + 1]);
+            return h5c__fail(H5C_ERR_SHAPE_MISMATCH, H5C_PARTITION_NAME
+                             " decreases at %d "
+                             "(%ld then %ld)",
+                             r + 1, (long)part[r], (long)part[r + 1]);
         }
     }
     if ((size_t)part[nprocs] != data_rows) {
-        return h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                         H5C_PARTITION_NAME " ends at %ld but data has %lu "
+        return h5c__fail(H5C_ERR_SHAPE_MISMATCH, H5C_PARTITION_NAME
+                         " ends at %ld but data has %lu "
                          "rows along the split axis",
                          (long)part[nprocs], (unsigned long)data_rows);
     }
@@ -572,23 +520,19 @@ static h5c_status_t read_partition(hid_t gid, int nprocs, int64_t *part,
  * from the plan's components tile by tile (see transfer_tiles). Everything
  * else - validation, agreement, group and __partition__ handling - is shared.
  */
-static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
-                                const void *buf, h5c_type_t type,
-                                int rank, const size_t *dims, unsigned flags,
-                                const tile_plan_t *pack)
-{
+static h5c_status_t pwrite_impl(h5c_file_t* file, const char* path, const void* buf, h5c_type_t type, int rank, const size_t* dims, unsigned flags, const tile_plan_t* pack) {
     h5c_status_t st;
-    MPI_Comm     comm;
-    int64_t     *part = NULL;
-    int64_t      nlocal;
-    hsize_t      fdims[H5C_MAX_RANK];
-    hid_t        ftype, mtype;
-    hid_t        gid = H5I_INVALID_HID, did = H5I_INVALID_HID;
-    hid_t        fsid = H5I_INVALID_HID, msid = H5I_INVALID_HID;
-    hid_t        xfer = H5I_INVALID_HID;
-    size_t       offset;
-    int          me, nprocs, r, i, existed;
-    char         dummy = 0;
+    MPI_Comm comm;
+    int64_t* part = NULL;
+    int64_t nlocal;
+    hsize_t fdims[H5C_MAX_RANK];
+    hid_t ftype, mtype;
+    hid_t gid = H5I_INVALID_HID, did = H5I_INVALID_HID;
+    hid_t fsid = H5I_INVALID_HID, msid = H5I_INVALID_HID;
+    hid_t xfer = H5I_INVALID_HID;
+    size_t offset;
+    int me, nprocs, r, i, existed;
+    char dummy = 0;
 
     if ((st = h5c__ensure_init()) != H5C_OK) {
         return st;
@@ -605,8 +549,7 @@ static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
         st = h5c__fail(H5C_ERR_INVALID_ARG, "buffer is NULL for '%s'", path);
     }
     if (st == H5C_OK && file->readonly) {
-        st = h5c__fail(H5C_ERR_STATE,
-                       "file is open read-only, cannot write '%s'", path);
+        st = h5c__fail(H5C_ERR_STATE, "file is open read-only, cannot write '%s'", path);
     }
     if (st == H5C_OK) {
         ftype = h5c__file_type(type);
@@ -624,7 +567,7 @@ static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
         return st;
     }
     if ((st = agree_shape(comm, path, rank, dims)) != H5C_OK) {
-        return st;  /* identical on every rank already */
+        return st; /* identical on every rank already */
     }
 
     if (MPI_Comm_rank(comm, &me) != MPI_SUCCESS ||
@@ -632,14 +575,12 @@ static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
         return agree(comm, h5c__fail(H5C_ERR_MPI, "MPI_Comm_rank/size failed"));
     }
 
-    part = (int64_t *)calloc((size_t)nprocs + 1, sizeof *part);
+    part = (int64_t*)calloc((size_t)nprocs + 1, sizeof *part);
     if (part == NULL) {
-        return agree(comm, h5c__fail(H5C_ERR_NOMEM,
-                                     "cannot allocate the partition vector"));
+        return agree(comm, h5c__fail(H5C_ERR_NOMEM, "cannot allocate the partition vector"));
     }
     nlocal = (int64_t)dims[0];
-    if (MPI_Allgather(&nlocal, 1, MPI_INT64_T, part + 1, 1, MPI_INT64_T,
-                      comm) != MPI_SUCCESS) {
+    if (MPI_Allgather(&nlocal, 1, MPI_INT64_T, part + 1, 1, MPI_INT64_T, comm) != MPI_SUCCESS) {
         free(part);
         return agree(comm, h5c__fail(H5C_ERR_MPI, "MPI_Allgather failed"));
     }
@@ -658,7 +599,8 @@ static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
     } else if (existed) {
         st = h5c__fail(H5C_ERR_EXISTS,
                        "'%s' already exists; pass H5C_WRITE_REPLACE "
-                       "to overwrite it", path);
+                       "to overwrite it",
+                       path);
     }
     if ((st = agree(comm, st)) != H5C_OK) {
         free(part);
@@ -687,21 +629,16 @@ static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
         st = h5c__fail_hdf5((long)fsid, "cannot build the file dataspace");
         goto done;
     }
-    did = H5Dcreate2(gid, DATA_NAME, ftype, fsid,
-                     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    did = H5Dcreate2(gid, DATA_NAME, ftype, fsid, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
     if (did < 0) {
-        st = h5c__fail_hdf5((long)did, "cannot create '%s/" DATA_NAME "'",
-                            path);
+        st = h5c__fail_hdf5((long)did, "cannot create '%s/" DATA_NAME "'", path);
         goto done;
     }
     if (pack != NULL) {
-        st = transfer_tiles(did, fsid, mtype, xfer, path, dims[0], offset,
-                            pack, 1);
+        st = transfer_tiles(did, fsid, mtype, xfer, path, dims[0], offset, pack, 1);
     } else if ((st = select_block(fsid, rank, dims, offset, &msid)) == H5C_OK) {
-        if (H5Dwrite(did, mtype, msid, fsid, xfer,
-                     (buf != NULL) ? buf : (const void *)&dummy) < 0) {
-            st = h5c__fail_hdf5(-1, "H5Dwrite failed for '%s/" DATA_NAME "'",
-                                path);
+        if (H5Dwrite(did, mtype, msid, fsid, xfer, (buf != NULL) ? buf : (const void*)&dummy) < 0) {
+            st = h5c__fail_hdf5(-1, "H5Dwrite failed for '%s/" DATA_NAME "'", path);
         }
     }
     /* __partition__ is collective too, so agree before entering it. */
@@ -712,21 +649,27 @@ static h5c_status_t pwrite_impl(h5c_file_t *file, const char *path,
     st = write_partition(gid, part, me, nprocs, xfer);
 
 done:
-    if (msid >= 0) { H5Sclose(msid); }
-    if (did  >= 0) { H5Dclose(did);  }
-    if (fsid >= 0) { H5Sclose(fsid); }
-    if (xfer >= 0) { H5Pclose(xfer); }
-    if (gid  >= 0) { H5Gclose(gid);  }
+    if (msid >= 0) {
+        H5Sclose(msid);
+    }
+    if (did >= 0) {
+        H5Dclose(did);
+    }
+    if (fsid >= 0) {
+        H5Sclose(fsid);
+    }
+    if (xfer >= 0) {
+        H5Pclose(xfer);
+    }
+    if (gid >= 0) {
+        H5Gclose(gid);
+    }
     free(part);
     return st;
 }
 
-h5c_status_t h5c_pwrite(h5c_file_t *file, const char *path, const void *buf,
-                        h5c_type_t type, int rank, const size_t *dims,
-                        unsigned flags)
-{
-    return h5c__record(file, pwrite_impl(file, path, buf, type, rank, dims,
-                                        flags, NULL));
+h5c_status_t h5c_pwrite(h5c_file_t* file, const char* path, const void* buf, h5c_type_t type, int rank, const size_t* dims, unsigned flags) {
+    return h5c__record(file, pwrite_impl(file, path, buf, type, rank, dims, flags, NULL));
 }
 
 /*
@@ -734,23 +677,16 @@ h5c_status_t h5c_pwrite(h5c_file_t *file, const char *path, const void *buf,
  * block. On success *gid_out and *did_out are open and owned by the caller.
  * The returned status is already agreed across the communicator.
  */
-static h5c_status_t open_for_read(h5c_file_t *file, const char *path,
-                                  int me, int nprocs,
-                                  hid_t *gid_out, hid_t *did_out,
-                                  h5c_dataset_info_t *info,
-                                  int64_t *part, size_t *offset,
-                                  size_t *nlocal)
-{
+static h5c_status_t open_for_read(h5c_file_t* file, const char* path, int me, int nprocs, hid_t* gid_out, hid_t* did_out, h5c_dataset_info_t* info, int64_t* part, size_t* offset, size_t* nlocal) {
     h5c_status_t st = H5C_OK;
-    hid_t        gid = H5I_INVALID_HID, did = H5I_INVALID_HID;
+    hid_t gid = H5I_INVALID_HID, did = H5I_INVALID_HID;
 
     *gid_out = H5I_INVALID_HID;
     *did_out = H5I_INVALID_HID;
 
     gid = H5Gopen2(file->fid, path, H5P_DEFAULT);
     if (gid < 0) {
-        st = h5c__fail(H5C_ERR_NOT_FOUND,
-                       "no distributed dataset group at '%s'", path);
+        st = h5c__fail(H5C_ERR_NOT_FOUND, "no distributed dataset group at '%s'", path);
     }
     if (st == H5C_OK) {
         did = H5Dopen2(gid, DATA_NAME, H5P_DEFAULT);
@@ -762,9 +698,7 @@ static h5c_status_t open_for_read(h5c_file_t *file, const char *path,
         st = h5c__info_from_dset(did, info);
     }
     if (st == H5C_OK && info->rank < 1) {
-        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                       "'%s/" DATA_NAME "' is a scalar; nothing to split",
-                       path);
+        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH, "'%s/" DATA_NAME "' is a scalar; nothing to split", path);
     }
     if (st == H5C_OK) {
         st = read_partition(gid, nprocs, part, info->dims[0]);
@@ -777,8 +711,12 @@ static h5c_status_t open_for_read(h5c_file_t *file, const char *path,
     /* Agree BEFORE the caller enters the collective transfer. */
     st = agree(pfile(file)->comm, st);
     if (st != H5C_OK) {
-        if (did >= 0) { H5Dclose(did); }
-        if (gid >= 0) { H5Gclose(gid); }
+        if (did >= 0) {
+            H5Dclose(did);
+        }
+        if (gid >= 0) {
+            H5Gclose(gid);
+        }
         return st;
     }
     *gid_out = gid;
@@ -787,21 +725,18 @@ static h5c_status_t open_for_read(h5c_file_t *file, const char *path,
 }
 
 /* Reads this rank's block; `unpack` mirrors pwrite_impl's `pack`. */
-static h5c_status_t pread_impl(h5c_file_t *file, const char *path, void *buf,
-                               h5c_type_t type, int rank, const size_t *dims,
-                               const tile_plan_t *unpack)
-{
-    h5c_status_t       st;
+static h5c_status_t pread_impl(h5c_file_t* file, const char* path, void* buf, h5c_type_t type, int rank, const size_t* dims, const tile_plan_t* unpack) {
+    h5c_status_t st;
     h5c_dataset_info_t info;
-    MPI_Comm           comm;
-    int64_t           *part = NULL;
-    hid_t              mtype;
-    hid_t              gid = H5I_INVALID_HID, did = H5I_INVALID_HID;
-    hid_t              fsid = H5I_INVALID_HID, msid = H5I_INVALID_HID;
-    hid_t              xfer = H5I_INVALID_HID;
-    size_t             offset = 0, nlocal = 0;
-    int                me, nprocs, i;
-    char               dummy = 0;
+    MPI_Comm comm;
+    int64_t* part = NULL;
+    hid_t mtype;
+    hid_t gid = H5I_INVALID_HID, did = H5I_INVALID_HID;
+    hid_t fsid = H5I_INVALID_HID, msid = H5I_INVALID_HID;
+    hid_t xfer = H5I_INVALID_HID;
+    size_t offset = 0, nlocal = 0;
+    int me, nprocs, i;
+    char dummy = 0;
 
     if ((st = h5c__ensure_init()) != H5C_OK) {
         return st;
@@ -837,14 +772,12 @@ static h5c_status_t pread_impl(h5c_file_t *file, const char *path, void *buf,
         MPI_Comm_size(comm, &nprocs) != MPI_SUCCESS) {
         return agree(comm, h5c__fail(H5C_ERR_MPI, "MPI_Comm_rank/size failed"));
     }
-    part = (int64_t *)calloc((size_t)nprocs + 1, sizeof *part);
+    part = (int64_t*)calloc((size_t)nprocs + 1, sizeof *part);
     if (part == NULL) {
-        return agree(comm, h5c__fail(H5C_ERR_NOMEM,
-                                     "cannot allocate the partition vector"));
+        return agree(comm, h5c__fail(H5C_ERR_NOMEM, "cannot allocate the partition vector"));
     }
 
-    st = open_for_read(file, path, me, nprocs, &gid, &did,
-                       &info, part, &offset, &nlocal);
+    st = open_for_read(file, path, me, nprocs, &gid, &did, &info, part, &offset, &nlocal);
     if (st != H5C_OK) {
         free(part);
         return st;
@@ -852,23 +785,16 @@ static h5c_status_t pread_impl(h5c_file_t *file, const char *path, void *buf,
 
     /* The caller's block must be exactly what __partition__ assigns it. */
     if (info.rank != rank) {
-        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                       "'%s/" DATA_NAME "' has rank %d, expected %d",
-                       path, info.rank, rank);
+        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH, "'%s/" DATA_NAME "' has rank %d, expected %d", path, info.rank, rank);
     } else if (dims[0] != nlocal) {
-        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                       "'%s': rank %d owns %lu rows per " H5C_PARTITION_NAME
-                       ", but dims[0] is %lu",
-                       path, me, (unsigned long)nlocal,
-                       (unsigned long)dims[0]);
+        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH, "'%s': rank %d owns %lu rows per " H5C_PARTITION_NAME ", but dims[0] is %lu", path, me, (unsigned long)nlocal, (unsigned long)dims[0]);
     } else {
         for (i = 1; i < rank; i++) {
             if (info.dims[i] != dims[i]) {
-                st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                               "'%s/" DATA_NAME "' dims[%d] is %lu, "
-                               "expected %lu", path, i,
-                               (unsigned long)info.dims[i],
-                               (unsigned long)dims[i]);
+                st = h5c__fail(H5C_ERR_SHAPE_MISMATCH, "'%s/" DATA_NAME
+                                                       "' dims[%d] is %lu, "
+                                                       "expected %lu",
+                               path, i, (unsigned long)info.dims[i], (unsigned long)dims[i]);
                 break;
             }
         }
@@ -888,45 +814,46 @@ static h5c_status_t pread_impl(h5c_file_t *file, const char *path, void *buf,
         goto done;
     }
     if (unpack != NULL) {
-        st = transfer_tiles(did, fsid, mtype, xfer, path, dims[0], offset,
-                            unpack, 0);
+        st = transfer_tiles(did, fsid, mtype, xfer, path, dims[0], offset, unpack, 0);
     } else if ((st = select_block(fsid, rank, dims, offset, &msid)) == H5C_OK) {
-        if (H5Dread(did, mtype, msid, fsid, xfer,
-                    (buf != NULL) ? buf : (void *)&dummy) < 0) {
-            st = h5c__fail_hdf5(-1, "H5Dread failed for '%s/" DATA_NAME "'",
-                                path);
+        if (H5Dread(did, mtype, msid, fsid, xfer, (buf != NULL) ? buf : (void*)&dummy) < 0) {
+            st = h5c__fail_hdf5(-1, "H5Dread failed for '%s/" DATA_NAME "'", path);
         }
     }
 
 done:
-    if (msid >= 0) { H5Sclose(msid); }
-    if (fsid >= 0) { H5Sclose(fsid); }
-    if (xfer >= 0) { H5Pclose(xfer); }
-    if (did  >= 0) { H5Dclose(did);  }
-    if (gid  >= 0) { H5Gclose(gid);  }
+    if (msid >= 0) {
+        H5Sclose(msid);
+    }
+    if (fsid >= 0) {
+        H5Sclose(fsid);
+    }
+    if (xfer >= 0) {
+        H5Pclose(xfer);
+    }
+    if (did >= 0) {
+        H5Dclose(did);
+    }
+    if (gid >= 0) {
+        H5Gclose(gid);
+    }
     free(part);
     return st;
 }
 
-h5c_status_t h5c_pread(h5c_file_t *file, const char *path, void *buf,
-                       h5c_type_t type, int rank, const size_t *dims)
-{
-    return h5c__record(file, pread_impl(file, path, buf, type, rank, dims,
-                                       NULL));
+h5c_status_t h5c_pread(h5c_file_t* file, const char* path, void* buf, h5c_type_t type, int rank, const size_t* dims) {
+    return h5c__record(file, pread_impl(file, path, buf, type, rank, dims, NULL));
 }
 
-static h5c_status_t pread_rows_impl(h5c_file_t *file, const char *path,
-                                    void *buf, h5c_type_t type, int rank,
-                                    const size_t *dims, size_t row_offset)
-{
-    h5c_status_t       st;
+static h5c_status_t pread_rows_impl(h5c_file_t* file, const char* path, void* buf, h5c_type_t type, int rank, const size_t* dims, size_t row_offset) {
+    h5c_status_t st;
     h5c_dataset_info_t info;
-    MPI_Comm           comm;
-    hid_t              mtype = H5I_INVALID_HID;
-    hid_t              did = H5I_INVALID_HID, fsid = H5I_INVALID_HID;
-    hid_t              msid = H5I_INVALID_HID, xfer = H5I_INVALID_HID;
-    int                i;
-    char               dummy = 0;
+    MPI_Comm comm;
+    hid_t mtype = H5I_INVALID_HID;
+    hid_t did = H5I_INVALID_HID, fsid = H5I_INVALID_HID;
+    hid_t msid = H5I_INVALID_HID, xfer = H5I_INVALID_HID;
+    int i;
+    char dummy = 0;
 
     if ((st = h5c__ensure_init()) != H5C_OK) {
         return st;
@@ -963,26 +890,19 @@ static h5c_status_t pread_rows_impl(h5c_file_t *file, const char *path,
         st = h5c__info_from_dset(did, &info);
     }
     if (st == H5C_OK && info.rank != rank) {
-        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                       "'%s' has rank %d, expected %d", path, info.rank, rank);
+        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH, "'%s' has rank %d, expected %d", path, info.rank, rank);
     }
     if (st == H5C_OK) {
         for (i = 1; i < rank; i++) {
             if (info.dims[i] != dims[i]) {
-                st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                               "'%s' dims[%d] is %lu, expected %lu", path, i,
-                               (unsigned long)info.dims[i],
-                               (unsigned long)dims[i]);
+                st = h5c__fail(H5C_ERR_SHAPE_MISMATCH, "'%s' dims[%d] is %lu, expected %lu", path, i, (unsigned long)info.dims[i], (unsigned long)dims[i]);
                 break;
             }
         }
     }
     if (st == H5C_OK &&
         (row_offset > info.dims[0] || dims[0] > info.dims[0] - row_offset)) {
-        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH,
-                       "'%s' has %lu rows; requested [%lu, %lu)", path,
-                       (unsigned long)info.dims[0], (unsigned long)row_offset,
-                       (unsigned long)(row_offset + dims[0]));
+        st = h5c__fail(H5C_ERR_SHAPE_MISMATCH, "'%s' has %lu rows; requested [%lu, %lu)", path, (unsigned long)info.dims[0], (unsigned long)row_offset, (unsigned long)(row_offset + dims[0]));
     }
     if ((st = agree(comm, st)) != H5C_OK) {
         goto done;
@@ -999,38 +919,38 @@ static h5c_status_t pread_rows_impl(h5c_file_t *file, const char *path,
         goto done;
     }
     if ((st = select_block(fsid, rank, dims, row_offset, &msid)) == H5C_OK &&
-        H5Dread(did, mtype, msid, fsid, xfer,
-                (buf != NULL) ? buf : (void *)&dummy) < 0) {
+        H5Dread(did, mtype, msid, fsid, xfer, (buf != NULL) ? buf : (void*)&dummy) < 0) {
         st = h5c__fail_hdf5(-1, "H5Dread failed for '%s'", path);
     }
 
 done:
-    if (msid >= 0) { H5Sclose(msid); }
-    if (fsid >= 0) { H5Sclose(fsid); }
-    if (xfer >= 0) { H5Pclose(xfer); }
-    if (did  >= 0) { H5Dclose(did);  }
+    if (msid >= 0) {
+        H5Sclose(msid);
+    }
+    if (fsid >= 0) {
+        H5Sclose(fsid);
+    }
+    if (xfer >= 0) {
+        H5Pclose(xfer);
+    }
+    if (did >= 0) {
+        H5Dclose(did);
+    }
     return st;
 }
 
-h5c_status_t h5c_pread_rows(h5c_file_t *file, const char *path, void *buf,
-                            h5c_type_t type, int rank, const size_t *dims,
-                            size_t row_offset)
-{
-    return h5c__record(file, pread_rows_impl(file, path, buf, type, rank,
-                                             dims, row_offset));
+h5c_status_t h5c_pread_rows(h5c_file_t* file, const char* path, void* buf, h5c_type_t type, int rank, const size_t* dims, size_t row_offset) {
+    return h5c__record(file, pread_rows_impl(file, path, buf, type, rank, dims, row_offset));
 }
 
-static h5c_status_t pinfo_impl(h5c_file_t *file, const char *path,
-                               h5c_dataset_info_t *local,
-                               h5c_dataset_info_t *global)
-{
-    h5c_status_t       st;
+static h5c_status_t pinfo_impl(h5c_file_t* file, const char* path, h5c_dataset_info_t* local, h5c_dataset_info_t* global) {
+    h5c_status_t st;
     h5c_dataset_info_t info;
-    MPI_Comm           comm;
-    int64_t           *part = NULL;
-    hid_t              gid, did;
-    size_t             offset = 0, nlocal = 0;
-    int                me, nprocs, i;
+    MPI_Comm comm;
+    int64_t* part = NULL;
+    hid_t gid, did;
+    size_t offset = 0, nlocal = 0;
+    int me, nprocs, i;
 
     if ((st = h5c__ensure_init()) != H5C_OK) {
         return st;
@@ -1042,8 +962,7 @@ static h5c_status_t pinfo_impl(h5c_file_t *file, const char *path,
 
     st = h5c__check_common(file, path, 0, NULL);
     if (st == H5C_OK && local == NULL && global == NULL) {
-        st = h5c__fail(H5C_ERR_INVALID_ARG,
-                       "h5c_pdataset_info: both outputs are NULL");
+        st = h5c__fail(H5C_ERR_INVALID_ARG, "h5c_pdataset_info: both outputs are NULL");
     }
     if ((st = agree(comm, st)) != H5C_OK) {
         return st;
@@ -1053,14 +972,12 @@ static h5c_status_t pinfo_impl(h5c_file_t *file, const char *path,
         MPI_Comm_size(comm, &nprocs) != MPI_SUCCESS) {
         return agree(comm, h5c__fail(H5C_ERR_MPI, "MPI_Comm_rank/size failed"));
     }
-    part = (int64_t *)calloc((size_t)nprocs + 1, sizeof *part);
+    part = (int64_t*)calloc((size_t)nprocs + 1, sizeof *part);
     if (part == NULL) {
-        return agree(comm, h5c__fail(H5C_ERR_NOMEM,
-                                     "cannot allocate the partition vector"));
+        return agree(comm, h5c__fail(H5C_ERR_NOMEM, "cannot allocate the partition vector"));
     }
 
-    st = open_for_read(file, path, me, nprocs, &gid, &did,
-                       &info, part, &offset, &nlocal);
+    st = open_for_read(file, path, me, nprocs, &gid, &did, &info, part, &offset, &nlocal);
     free(part);
     if (st != H5C_OK) {
         return st;
@@ -1074,7 +991,7 @@ static h5c_status_t pinfo_impl(h5c_file_t *file, const char *path,
     if (local != NULL) {
         *local = info;
         local->dims[0] = nlocal;
-        local->count   = nlocal;
+        local->count = nlocal;
         for (i = 1; i < info.rank; i++) {
             local->count *= info.dims[i];
         }
@@ -1082,10 +999,7 @@ static h5c_status_t pinfo_impl(h5c_file_t *file, const char *path,
     return H5C_OK;
 }
 
-h5c_status_t h5c_pdataset_info(h5c_file_t *file, const char *path,
-                               h5c_dataset_info_t *local,
-                               h5c_dataset_info_t *global)
-{
+h5c_status_t h5c_pdataset_info(h5c_file_t* file, const char* path, h5c_dataset_info_t* local, h5c_dataset_info_t* global) {
     return h5c__record(file, pinfo_impl(file, path, local, global));
 }
 
@@ -1097,19 +1011,15 @@ h5c_status_t h5c_pdataset_info(h5c_file_t *file, const char *path,
  * On success `*part_out` is a malloc'd vector of `*nprocs_out + 1` entries and
  * belongs to the caller.
  */
-static h5c_status_t players_impl(h5c_file_t *file, const char *path,
-                                 h5c_status_t extra,
-                                 int64_t **part_out, int *nprocs_out,
-                                 size_t *offset_out, size_t *nlocal_out)
-{
-    h5c_status_t       st;
+static h5c_status_t players_impl(h5c_file_t* file, const char* path, h5c_status_t extra, int64_t** part_out, int* nprocs_out, size_t* offset_out, size_t* nlocal_out) {
+    h5c_status_t st;
     h5c_dataset_info_t info;
-    MPI_Comm           comm;
-    int64_t           *part = NULL;
-    hid_t              gid, did;
-    int                me, nprocs;
+    MPI_Comm comm;
+    int64_t* part = NULL;
+    hid_t gid, did;
+    int me, nprocs;
 
-    *part_out   = NULL;
+    *part_out = NULL;
     *nprocs_out = 0;
     *offset_out = 0;
     *nlocal_out = 0;
@@ -1139,15 +1049,13 @@ static h5c_status_t players_impl(h5c_file_t *file, const char *path,
         MPI_Comm_size(comm, &nprocs) != MPI_SUCCESS) {
         return agree(comm, h5c__fail(H5C_ERR_MPI, "MPI_Comm_rank/size failed"));
     }
-    part = (int64_t *)calloc((size_t)nprocs + 1, sizeof *part);
+    part = (int64_t*)calloc((size_t)nprocs + 1, sizeof *part);
     if (part == NULL) {
-        return agree(comm, h5c__fail(H5C_ERR_NOMEM,
-                                     "cannot allocate the partition vector"));
+        return agree(comm, h5c__fail(H5C_ERR_NOMEM, "cannot allocate the partition vector"));
     }
 
     /* open_for_read validates __partition__ and agrees the status for us. */
-    st = open_for_read(file, path, me, nprocs, &gid, &did,
-                       &info, part, offset_out, nlocal_out);
+    st = open_for_read(file, path, me, nprocs, &gid, &did, &info, part, offset_out, nlocal_out);
     if (st != H5C_OK) {
         free(part);
         return st;
@@ -1155,18 +1063,16 @@ static h5c_status_t players_impl(h5c_file_t *file, const char *path,
     H5Dclose(did);
     H5Gclose(gid);
 
-    *part_out   = part;
+    *part_out = part;
     *nprocs_out = nprocs;
     return H5C_OK;
 }
 
-static h5c_status_t poffset_impl(h5c_file_t *file, const char *path,
-                                 size_t *offset, size_t *nlocal)
-{
+static h5c_status_t poffset_impl(h5c_file_t* file, const char* path, size_t* offset, size_t* nlocal) {
     h5c_status_t st;
-    int64_t     *part = NULL;
-    size_t       off = 0, n = 0;
-    int          nprocs = 0;
+    int64_t* part = NULL;
+    size_t off = 0, n = 0;
+    int nprocs = 0;
 
     st = players_impl(file, path, H5C_OK, &part, &nprocs, &off, &n);
     if (st != H5C_OK) {
@@ -1183,24 +1089,18 @@ static h5c_status_t poffset_impl(h5c_file_t *file, const char *path,
     return H5C_OK;
 }
 
-h5c_status_t h5c_poffset(h5c_file_t *file, const char *path,
-                         size_t *offset, size_t *nlocal)
-{
+h5c_status_t h5c_poffset(h5c_file_t* file, const char* path, size_t* offset, size_t* nlocal) {
     return h5c__record(file, poffset_impl(file, path, offset, nlocal));
 }
 
-static h5c_status_t ppartition_impl(h5c_file_t *file, const char *path,
-                                    int64_t *bounds, size_t capacity,
-                                    size_t *count)
-{
+static h5c_status_t ppartition_impl(h5c_file_t* file, const char* path, int64_t* bounds, size_t capacity, size_t* count) {
     h5c_status_t st;
-    int64_t     *part = NULL;
-    size_t       off = 0, n = 0, len;
-    int          nprocs = 0, r;
+    int64_t* part = NULL;
+    size_t off = 0, n = 0, len;
+    int nprocs = 0, r;
 
     st = (bounds == NULL && count == NULL)
-             ? h5c__fail(H5C_ERR_INVALID_ARG,
-                         "h5c_ppartition: both outputs are NULL")
+             ? h5c__fail(H5C_ERR_INVALID_ARG, "h5c_ppartition: both outputs are NULL")
              : H5C_OK;
 
     st = players_impl(file, path, st, &part, &nprocs, &off, &n);
@@ -1233,23 +1133,17 @@ static h5c_status_t ppartition_impl(h5c_file_t *file, const char *path,
     return agree(pfile(file)->comm, st);
 }
 
-h5c_status_t h5c_ppartition(h5c_file_t *file, const char *path,
-                            int64_t *bounds, size_t capacity, size_t *count)
-{
-    return h5c__record(file,
-                       ppartition_impl(file, path, bounds, capacity, count));
+h5c_status_t h5c_ppartition(h5c_file_t* file, const char* path, int64_t* bounds, size_t capacity, size_t* count) {
+    return h5c__record(file, ppartition_impl(file, path, bounds, capacity, count));
 }
 
 /* Local checks shared by the two interleaved entry points. */
-static h5c_status_t pcheck_comps(const void *const *comps, size_t ncomp,
-                                 size_t n, h5c_type_t type, size_t *esize)
-{
+static h5c_status_t pcheck_comps(const void* const* comps, size_t ncomp, size_t n, h5c_type_t type, size_t* esize) {
     size_t c;
 
     *esize = h5c_type_size(type);
     if (*esize == 0) {
-        return h5c__fail(H5C_ERR_INVALID_ARG,
-                         "type %d cannot be interleaved", (int)type);
+        return h5c__fail(H5C_ERR_INVALID_ARG, "type %d cannot be interleaved", (int)type);
     }
     if (ncomp == 0) {
         return h5c__fail(H5C_ERR_INVALID_ARG, "ncomp is 0");
@@ -1260,22 +1154,18 @@ static h5c_status_t pcheck_comps(const void *const *comps, size_t ncomp,
     if (n > 0) {
         for (c = 0; c < ncomp; c++) {
             if (comps[c] == NULL) {
-                return h5c__fail(H5C_ERR_INVALID_ARG,
-                                 "comps[%lu] is NULL", (unsigned long)c);
+                return h5c__fail(H5C_ERR_INVALID_ARG, "comps[%lu] is NULL", (unsigned long)c);
             }
         }
     }
     return H5C_OK;
 }
 
-h5c_status_t h5c_pwrite_interleaved(h5c_file_t *file, const char *path,
-                                    const void *const *comps, size_t ncomp,
-                                    size_t n, h5c_type_t type, unsigned flags)
-{
+h5c_status_t h5c_pwrite_interleaved(h5c_file_t* file, const char* path, const void* const* comps, size_t ncomp, size_t n, h5c_type_t type, unsigned flags) {
     h5c_status_t st;
-    MPI_Comm     comm;
-    tile_plan_t  plan;
-    size_t       dims[2], row_bytes;
+    MPI_Comm comm;
+    tile_plan_t plan;
+    size_t dims[2], row_bytes;
 
     if ((st = h5c__ensure_init()) != H5C_OK) {
         return h5c__record(file, st);
@@ -1288,16 +1178,14 @@ h5c_status_t h5c_pwrite_interleaved(h5c_file_t *file, const char *path,
     memset(&plan, 0, sizeof plan);
     st = pcheck_comps(comps, ncomp, n, type, &plan.esize);
     if (st == H5C_OK) {
-        plan.comps = (void *const *)comps;
+        plan.comps = (void* const*)comps;
         plan.ncomp = ncomp;
-        row_bytes  = ncomp * plan.esize;
-        plan.rows  = h5c__tile_rows(n, row_bytes);
+        row_bytes = ncomp * plan.esize;
+        plan.rows = h5c__tile_rows(n, row_bytes);
         if (plan.rows > 0) {
-            plan.stage = (char *)malloc(plan.rows * row_bytes);
+            plan.stage = (char*)malloc(plan.rows * row_bytes);
             if (plan.stage == NULL) {
-                st = h5c__fail(H5C_ERR_NOMEM,
-                               "cannot allocate %lu bytes to pack '%s'",
-                               (unsigned long)(plan.rows * row_bytes), path);
+                st = h5c__fail(H5C_ERR_NOMEM, "cannot allocate %lu bytes to pack '%s'", (unsigned long)(plan.rows * row_bytes), path);
             }
         }
     }
@@ -1318,21 +1206,16 @@ h5c_status_t h5c_pwrite_interleaved(h5c_file_t *file, const char *path,
      */
     dims[0] = n;
     dims[1] = ncomp;
-    st = h5c__record(file,
-                     pwrite_impl(file, path, NULL, type, 2, dims, flags,
-                                 &plan));
+    st = h5c__record(file, pwrite_impl(file, path, NULL, type, 2, dims, flags, &plan));
     free(plan.stage);
     return st;
 }
 
-h5c_status_t h5c_pread_interleaved(h5c_file_t *file, const char *path,
-                                   void *const *comps, size_t ncomp,
-                                   size_t n, h5c_type_t type)
-{
+h5c_status_t h5c_pread_interleaved(h5c_file_t* file, const char* path, void* const* comps, size_t ncomp, size_t n, h5c_type_t type) {
     h5c_status_t st;
-    MPI_Comm     comm;
-    tile_plan_t  plan;
-    size_t       dims[2], row_bytes;
+    MPI_Comm comm;
+    tile_plan_t plan;
+    size_t dims[2], row_bytes;
 
     if ((st = h5c__ensure_init()) != H5C_OK) {
         return h5c__record(file, st);
@@ -1343,18 +1226,16 @@ h5c_status_t h5c_pread_interleaved(h5c_file_t *file, const char *path,
     comm = pfile(file)->comm;
 
     memset(&plan, 0, sizeof plan);
-    st = pcheck_comps((const void *const *)comps, ncomp, n, type, &plan.esize);
+    st = pcheck_comps((const void* const*)comps, ncomp, n, type, &plan.esize);
     if (st == H5C_OK) {
         plan.comps = comps;
         plan.ncomp = ncomp;
-        row_bytes  = ncomp * plan.esize;
-        plan.rows  = h5c__tile_rows(n, row_bytes);
+        row_bytes = ncomp * plan.esize;
+        plan.rows = h5c__tile_rows(n, row_bytes);
         if (plan.rows > 0) {
-            plan.stage = (char *)malloc(plan.rows * row_bytes);
+            plan.stage = (char*)malloc(plan.rows * row_bytes);
             if (plan.stage == NULL) {
-                st = h5c__fail(H5C_ERR_NOMEM,
-                               "cannot allocate %lu bytes to unpack '%s'",
-                               (unsigned long)(plan.rows * row_bytes), path);
+                st = h5c__fail(H5C_ERR_NOMEM, "cannot allocate %lu bytes to unpack '%s'", (unsigned long)(plan.rows * row_bytes), path);
             }
         }
     }

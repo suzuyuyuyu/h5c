@@ -7,10 +7,9 @@
  *   - a link creation property list that creates intermediate groups.
  */
 static hid_t g_bool_type = H5I_INVALID_HID;
-static hid_t g_lcpl      = H5I_INVALID_HID;
+static hid_t g_lcpl = H5I_INVALID_HID;
 
-static hid_t bool_type(void)
-{
+static hid_t bool_type(void) {
     if (g_bool_type == H5I_INVALID_HID) {
         const int8_t f = 0, t = 1;
         hid_t tid = H5Tenum_create(H5T_STD_I8LE);
@@ -19,7 +18,7 @@ static hid_t bool_type(void)
             return H5I_INVALID_HID;
         }
         if (H5Tenum_insert(tid, "FALSE", &f) < 0 ||
-            H5Tenum_insert(tid, "TRUE",  &t) < 0) {
+            H5Tenum_insert(tid, "TRUE", &t) < 0) {
             H5Tclose(tid);
             h5c__fail_hdf5(-1, "H5Tenum_insert failed for bool");
             return H5I_INVALID_HID;
@@ -29,37 +28,50 @@ static hid_t bool_type(void)
     return g_bool_type;
 }
 
-hid_t h5c__file_type(h5c_type_t type)
-{
+hid_t h5c__file_type(h5c_type_t type) {
     switch (type) {
-    /* Explicit little-endian so files are reproducible across platforms. */
-    case H5C_F32:  return H5T_IEEE_F32LE;
-    case H5C_F64:  return H5T_IEEE_F64LE;
-    case H5C_I8:   return H5T_STD_I8LE;
-    case H5C_I16:  return H5T_STD_I16LE;
-    case H5C_I32:  return H5T_STD_I32LE;
-    case H5C_I64:  return H5T_STD_I64LE;
-    case H5C_BOOL: return bool_type();
-    default:       return H5I_INVALID_HID;
+        /* Explicit little-endian so files are reproducible across platforms. */
+        case H5C_F32:
+            return H5T_IEEE_F32LE;
+        case H5C_F64:
+            return H5T_IEEE_F64LE;
+        case H5C_I8:
+            return H5T_STD_I8LE;
+        case H5C_I16:
+            return H5T_STD_I16LE;
+        case H5C_I32:
+            return H5T_STD_I32LE;
+        case H5C_I64:
+            return H5T_STD_I64LE;
+        case H5C_BOOL:
+            return bool_type();
+        default:
+            return H5I_INVALID_HID;
     }
 }
 
-hid_t h5c__mem_type(h5c_type_t type)
-{
+hid_t h5c__mem_type(h5c_type_t type) {
     switch (type) {
-    case H5C_F32:  return H5T_NATIVE_FLOAT;
-    case H5C_F64:  return H5T_NATIVE_DOUBLE;
-    case H5C_I8:   return H5T_NATIVE_INT8;
-    case H5C_I16:  return H5T_NATIVE_INT16;
-    case H5C_I32:  return H5T_NATIVE_INT32;
-    case H5C_I64:  return H5T_NATIVE_INT64;
-    case H5C_BOOL: return bool_type();
-    default:       return H5I_INVALID_HID;
+        case H5C_F32:
+            return H5T_NATIVE_FLOAT;
+        case H5C_F64:
+            return H5T_NATIVE_DOUBLE;
+        case H5C_I8:
+            return H5T_NATIVE_INT8;
+        case H5C_I16:
+            return H5T_NATIVE_INT16;
+        case H5C_I32:
+            return H5T_NATIVE_INT32;
+        case H5C_I64:
+            return H5T_NATIVE_INT64;
+        case H5C_BOOL:
+            return bool_type();
+        default:
+            return H5I_INVALID_HID;
     }
 }
 
-hid_t h5c__mem_type_read(h5c_type_t type)
-{
+hid_t h5c__mem_type_read(h5c_type_t type) {
     /* See the note in h5c_internal.h: enum -> int converts, int -> enum does
        not, so reads go through int8 and only writes use the enum. */
     if (type == H5C_BOOL) {
@@ -68,53 +80,58 @@ hid_t h5c__mem_type_read(h5c_type_t type)
     return h5c__mem_type(type);
 }
 
-size_t h5c_type_size(h5c_type_t type)
-{
+size_t h5c_type_size(h5c_type_t type) {
     switch (type) {
-    case H5C_F32:  return sizeof(float);
-    case H5C_F64:  return sizeof(double);
-    case H5C_I8:   return sizeof(int8_t);
-    case H5C_I16:  return sizeof(int16_t);
-    case H5C_I32:  return sizeof(int32_t);
-    case H5C_I64:  return sizeof(int64_t);
-    case H5C_BOOL: return sizeof(h5c_bool_t);
-    default:       return 0;
+        case H5C_F32:
+            return sizeof(float);
+        case H5C_F64:
+            return sizeof(double);
+        case H5C_I8:
+            return sizeof(int8_t);
+        case H5C_I16:
+            return sizeof(int16_t);
+        case H5C_I32:
+            return sizeof(int32_t);
+        case H5C_I64:
+            return sizeof(int64_t);
+        case H5C_BOOL:
+            return sizeof(h5c_bool_t);
+        default:
+            return 0;
     }
 }
 
-h5c_type_t h5c__type_from_hid(hid_t tid)
-{
+h5c_type_t h5c__type_from_hid(hid_t tid) {
     H5T_class_t cls = H5Tget_class(tid);
-    size_t      sz  = H5Tget_size(tid);
+    size_t sz = H5Tget_size(tid);
 
     switch (cls) {
-    case H5T_FLOAT:
-        if (sz == sizeof(float))  return H5C_F32;
-        if (sz == sizeof(double)) return H5C_F64;
-        return H5C_TYPE_UNKNOWN;
-    case H5T_INTEGER:
-        if (sz == 8) return H5C_I64;
-        if (sz == 4) return H5C_I32;
-        if (sz == 2) return H5C_I16;
-        if (sz == 1) return H5C_I8;
-        return H5C_TYPE_UNKNOWN;
-    case H5T_ENUM:
-        /*
-         * The only enum h5c writes is the boolean one. A one-byte plain
-         * integer now reports H5C_I8 rather than H5C_BOOL, since narrow
-         * integers became first-class for connectivity data; reading such a
-         * dataset into h5c_bool_t still works, because HDF5 converts.
-         */
-        return H5C_BOOL;
-    case H5T_STRING:
-        return H5C_STRING;
-    default:
-        return H5C_TYPE_UNKNOWN;
+        case H5T_FLOAT:
+            if (sz == sizeof(float)) return H5C_F32;
+            if (sz == sizeof(double)) return H5C_F64;
+            return H5C_TYPE_UNKNOWN;
+        case H5T_INTEGER:
+            if (sz == 8) return H5C_I64;
+            if (sz == 4) return H5C_I32;
+            if (sz == 2) return H5C_I16;
+            if (sz == 1) return H5C_I8;
+            return H5C_TYPE_UNKNOWN;
+        case H5T_ENUM:
+            /*
+             * The only enum h5c writes is the boolean one. A one-byte plain
+             * integer now reports H5C_I8 rather than H5C_BOOL, since narrow
+             * integers became first-class for connectivity data; reading such a
+             * dataset into h5c_bool_t still works, because HDF5 converts.
+             */
+            return H5C_BOOL;
+        case H5T_STRING:
+            return H5C_STRING;
+        default:
+            return H5C_TYPE_UNKNOWN;
     }
 }
 
-hid_t h5c__lcpl(void)
-{
+hid_t h5c__lcpl(void) {
     if (g_lcpl == H5I_INVALID_HID) {
         hid_t p = H5Pcreate(H5P_LINK_CREATE);
         if (p < 0) {
@@ -131,8 +148,7 @@ hid_t h5c__lcpl(void)
     return g_lcpl;
 }
 
-void h5c__type_cleanup(void)
-{
+void h5c__type_cleanup(void) {
     if (g_bool_type != H5I_INVALID_HID) {
         H5Tclose(g_bool_type);
         g_bool_type = H5I_INVALID_HID;

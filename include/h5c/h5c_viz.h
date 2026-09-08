@@ -51,9 +51,9 @@ extern "C" {
 #endif
 
 /* Defaults applied when a mesh leaves the corresponding field unset. */
-#define H5C_VIZ_DEFAULT_UGRID_NAME    "ugrid"
+#define H5C_VIZ_DEFAULT_UGRID_NAME "ugrid"
 #define H5C_VIZ_DEFAULT_POLYDATA_NAME "polydata"
-#define H5C_VIZ_DEFAULT_TOPOLOGY      "Hexahedron"
+#define H5C_VIZ_DEFAULT_TOPOLOGY "Hexahedron"
 #define H5C_VIZ_DEFAULT_NODES_PER_ELEM 8
 
 typedef struct h5c_viz h5c_viz_t;
@@ -62,7 +62,7 @@ typedef enum h5c_viz_kind {
     /* Cells plus connectivity. */
     H5C_VIZ_UNSTRUCTURED = 1,
     /* A point cloud: nodes only, no connectivity, no cell data. */
-    H5C_VIZ_POLYDATA     = 2
+    H5C_VIZ_POLYDATA = 2
 } h5c_viz_kind_t;
 
 /*
@@ -79,11 +79,11 @@ typedef enum h5c_viz_kind {
  */
 typedef struct h5c_viz_mesh {
     h5c_viz_kind_t kind;
-    const char *name;              /* group under "/"; NULL -> kind default */
-    const char *topology;          /* XDMF topology_type; NULL -> Hexahedron */
-    int    nodes_per_element;      /* 0 -> 8; ignored for POLYDATA */
-    size_t num_points;             /* THIS rank's node count; may be 0 */
-    size_t num_cells;              /* THIS rank's owned cells; 0 for POLYDATA */
+    const char* name;      /* group under "/"; NULL -> kind default */
+    const char* topology;  /* XDMF topology_type; NULL -> Hexahedron */
+    int nodes_per_element; /* 0 -> 8; ignored for POLYDATA */
+    size_t num_points;     /* THIS rank's node count; may be 0 */
+    size_t num_cells;      /* THIS rank's owned cells; 0 for POLYDATA */
 } h5c_viz_mesh_t;
 
 /*
@@ -93,18 +93,17 @@ typedef struct h5c_viz_mesh {
  * One file per time step is the intended usage; `time` is what places it in
  * the series.
  */
-h5c_status_t h5c_viz_open(const char *path, double time,
-                          h5c_viz_t **out);
+h5c_status_t h5c_viz_open(const char* path, double time, h5c_viz_t** out);
 
 /*
  * Closes the file and frees the handle, which is invalid afterwards either
  * way. The status describes only the close, as for h5c_close(); read
  * h5c_viz_status() first if you want to know whether anything failed earlier.
  */
-h5c_status_t h5c_viz_close(h5c_viz_t *viz);
+h5c_status_t h5c_viz_close(h5c_viz_t* viz);
 
 /* First non-OK status recorded on this writer, or H5C_OK. */
-h5c_status_t h5c_viz_status(const h5c_viz_t *viz);
+h5c_status_t h5c_viz_status(const h5c_viz_t* viz);
 
 /*
  * Starts (or re-selects) a mesh and makes it the target of the write calls
@@ -114,11 +113,10 @@ h5c_status_t h5c_viz_status(const h5c_viz_t *viz);
  *
  * Calling it again with a different name adds another mesh to the same file.
  */
-h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh);
+h5c_status_t h5c_viz_begin_mesh(h5c_viz_t* viz, const h5c_viz_mesh_t* mesh);
 
 /* This rank's offsets within the current mesh, once begin_mesh has run. */
-h5c_status_t h5c_viz_offsets(const h5c_viz_t *viz,
-                             size_t *point_offset, size_t *cell_offset);
+h5c_status_t h5c_viz_offsets(const h5c_viz_t* viz, size_t* point_offset, size_t* cell_offset);
 
 /*
  * Node coordinates, written to <mesh>/geometry/nodes as (total_points, 3).
@@ -128,12 +126,9 @@ h5c_status_t h5c_viz_offsets(const h5c_viz_t *viz,
  * which is how a solver that keeps x, y and z apart already holds them.
  * `type` must be H5C_F32 or H5C_F64.
  */
-h5c_status_t h5c_viz_write_nodes(h5c_viz_t *viz, const void *nodes,
-                                 h5c_type_t type);
+h5c_status_t h5c_viz_write_nodes(h5c_viz_t* viz, const void* nodes, h5c_type_t type);
 
-h5c_status_t h5c_viz_write_nodes_comps(h5c_viz_t *viz,
-                                       const void *const *xyz,
-                                       h5c_type_t type);
+h5c_status_t h5c_viz_write_nodes_comps(h5c_viz_t* viz, const void* const* xyz, h5c_type_t type);
 
 /*
  * Cell connectivity, written to <mesh>/geometry/connectivity as
@@ -146,8 +141,7 @@ h5c_status_t h5c_viz_write_nodes_comps(h5c_viz_t *viz,
  *
  * `type` may be H5C_I8, H5C_I16, H5C_I32 or H5C_I64. Not valid for POLYDATA.
  */
-h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
-                                        h5c_type_t type);
+h5c_status_t h5c_viz_write_connectivity(h5c_viz_t* viz, const void* conn, h5c_type_t type);
 
 /*
  * Point and cell fields, written to <mesh>/point_data/<name> and
@@ -164,28 +158,20 @@ h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
  * the usual shape of solver data; the plain forms take one buffer already
  * laid out as (n, ncomp).
  */
-h5c_status_t h5c_viz_write_point_data(h5c_viz_t *viz, const char *name,
-                                      const void *buf, h5c_type_t type,
-                                      size_t ncomp);
+h5c_status_t h5c_viz_write_point_data(h5c_viz_t* viz, const char* name, const void* buf, h5c_type_t type, size_t ncomp);
 
-h5c_status_t h5c_viz_write_point_data_comps(h5c_viz_t *viz, const char *name,
-                                            const void *const *comps,
-                                            h5c_type_t type, size_t ncomp);
+h5c_status_t h5c_viz_write_point_data_comps(h5c_viz_t* viz, const char* name, const void* const* comps, h5c_type_t type, size_t ncomp);
 
-h5c_status_t h5c_viz_write_cell_data(h5c_viz_t *viz, const char *name,
-                                     const void *buf, h5c_type_t type,
-                                     size_t ncomp);
+h5c_status_t h5c_viz_write_cell_data(h5c_viz_t* viz, const char* name, const void* buf, h5c_type_t type, size_t ncomp);
 
-h5c_status_t h5c_viz_write_cell_data_comps(h5c_viz_t *viz, const char *name,
-                                           const void *const *comps,
-                                           h5c_type_t type, size_t ncomp);
+h5c_status_t h5c_viz_write_cell_data_comps(h5c_viz_t* viz, const char* name, const void* const* comps, h5c_type_t type, size_t ncomp);
 
 /*
  * XDMF's name for a component count: "Scalar", "Vector", "Tensor6",
  * "Tensor", or NULL when XDMF has no name for it. Exposed because a caller
  * writing its own metadata needs the same mapping.
  */
-const char *h5c_viz_attribute_type(size_t ncomp);
+const char* h5c_viz_attribute_type(size_t ncomp);
 
 #ifdef __cplusplus
 }

@@ -47,14 +47,13 @@ extern "C" {
 #define H5C_PARTITION_NAME "__partition__"
 
 /* Opens `path` for parallel I/O on MPI_COMM_WORLD with MPI_INFO_NULL. */
-h5c_status_t h5c_popen(const char *path, h5c_mode_t mode, h5c_file_t **out);
+h5c_status_t h5c_popen(const char* path, h5c_mode_t mode, h5c_file_t** out);
 
 /*
  * As above on an explicit communicator. `info` carries MPI-IO hints and may
  * be MPI_INFO_NULL. The communicator must stay valid until h5c_close().
  */
-h5c_status_t h5c_popen_comm(const char *path, h5c_mode_t mode,
-                            MPI_Comm comm, MPI_Info info, h5c_file_t **out);
+h5c_status_t h5c_popen_comm(const char* path, h5c_mode_t mode, MPI_Comm comm, MPI_Info info, h5c_file_t** out);
 
 /*
  * Selects the transfer mode for subsequent parallel calls on this file.
@@ -66,11 +65,11 @@ h5c_status_t h5c_popen_comm(const char *path, h5c_mode_t mode,
  * have requested the same mode. Set it to the same value on every rank, or
  * ranks will disagree about a call they all have to enter together.
  */
-h5c_status_t h5c_pset_collective(h5c_file_t *file, int collective);
-int          h5c_pis_collective(const h5c_file_t *file);
+h5c_status_t h5c_pset_collective(h5c_file_t* file, int collective);
+int h5c_pis_collective(const h5c_file_t* file);
 
 /* The file's communicator, or MPI_COMM_NULL if it was not opened in parallel. */
-MPI_Comm h5c_pcomm(const h5c_file_t *file);
+MPI_Comm h5c_pcomm(const h5c_file_t* file);
 
 /*
  * Writes this rank's block. `dims` describes the LOCAL block; dims[0] is this
@@ -82,9 +81,7 @@ MPI_Comm h5c_pcomm(const h5c_file_t *file);
  * entering the collective call. That is the normal shape of the code on a rank
  * that owns no rows, so it is guaranteed rather than merely tolerated.
  */
-h5c_status_t h5c_pwrite(h5c_file_t *file, const char *path, const void *buf,
-                        h5c_type_t type, int rank, const size_t *dims,
-                        unsigned flags);
+h5c_status_t h5c_pwrite(h5c_file_t* file, const char* path, const void* buf, h5c_type_t type, int rank, const size_t* dims, unsigned flags);
 
 /*
  * Reads this rank's block, sized by `dims` exactly as for h5c_pwrite().
@@ -94,8 +91,7 @@ h5c_status_t h5c_pwrite(h5c_file_t *file, const char *path, const void *buf,
  *
  * As for h5c_pwrite(), `buf` may be NULL when dims[0] == 0.
  */
-h5c_status_t h5c_pread(h5c_file_t *file, const char *path, void *buf,
-                       h5c_type_t type, int rank, const size_t *dims);
+h5c_status_t h5c_pread(h5c_file_t* file, const char* path, void* buf, h5c_type_t type, int rank, const size_t* dims);
 
 /*
  * Reads rows [row_offset, row_offset + dims[0]) from an ordinary dataset.
@@ -104,18 +100,14 @@ h5c_status_t h5c_pread(h5c_file_t *file, const char *path, void *buf,
  * every run. All ranks call collectively; row offsets and dims[0] may differ,
  * while rank and dims[1..] must agree.
  */
-h5c_status_t h5c_pread_rows(h5c_file_t *file, const char *path, void *buf,
-                            h5c_type_t type, int rank, const size_t *dims,
-                            size_t row_offset);
+h5c_status_t h5c_pread_rows(h5c_file_t* file, const char* path, void* buf, h5c_type_t type, int rank, const size_t* dims, size_t row_offset);
 
 /*
  * Shape of a distributed dataset. `local` reports this rank's block as
  * recorded in __partition__, `global` the full extent of "data".
  * Either output may be NULL.
  */
-h5c_status_t h5c_pdataset_info(h5c_file_t *file, const char *path,
-                               h5c_dataset_info_t *local,
-                               h5c_dataset_info_t *global);
+h5c_status_t h5c_pdataset_info(h5c_file_t* file, const char* path, h5c_dataset_info_t* local, h5c_dataset_info_t* global);
 
 /*
  * Where this rank's block sits inside the distributed dataset.
@@ -129,8 +121,7 @@ h5c_status_t h5c_pdataset_info(h5c_file_t *file, const char *path,
  * Collective: every rank must call it, and the stored __partition__ is
  * validated exactly as h5c_pread() validates it.
  */
-h5c_status_t h5c_poffset(h5c_file_t *file, const char *path,
-                         size_t *offset, size_t *nlocal);
+h5c_status_t h5c_poffset(h5c_file_t* file, const char* path, size_t* offset, size_t* nlocal);
 
 /*
  * The full rank-boundary vector: nprocs + 1 entries, starting at 0 and
@@ -146,8 +137,7 @@ h5c_status_t h5c_poffset(h5c_file_t *file, const char *path,
  *
  * Collective: every rank must call it.
  */
-h5c_status_t h5c_ppartition(h5c_file_t *file, const char *path,
-                            int64_t *bounds, size_t capacity, size_t *count);
+h5c_status_t h5c_ppartition(h5c_file_t* file, const char* path, int64_t* bounds, size_t capacity, size_t* count);
 
 /*
  * Interleaved multi-component write, distributed along the split axis.
@@ -171,13 +161,9 @@ h5c_status_t h5c_ppartition(h5c_file_t *file, const char *path,
  *     C can take a list of differently-typed buffers, and the alternative
  *     would be a per-type entry point for every rank of every type.
  */
-h5c_status_t h5c_pwrite_interleaved(h5c_file_t *file, const char *path,
-                                    const void *const *comps, size_t ncomp,
-                                    size_t n, h5c_type_t type, unsigned flags);
+h5c_status_t h5c_pwrite_interleaved(h5c_file_t* file, const char* path, const void* const* comps, size_t ncomp, size_t n, h5c_type_t type, unsigned flags);
 
-h5c_status_t h5c_pread_interleaved(h5c_file_t *file, const char *path,
-                                   void *const *comps, size_t ncomp,
-                                   size_t n, h5c_type_t type);
+h5c_status_t h5c_pread_interleaved(h5c_file_t* file, const char* path, void* const* comps, size_t ncomp, size_t n, h5c_type_t type);
 
 #ifdef __cplusplus
 }

@@ -1,28 +1,25 @@
-#include "h5c_internal.h"
-
-#include "h5c_viz_internal.h"
-
 #include <stdlib.h>
 #include <string.h>
 
+#include "h5c_internal.h"
+#include "h5c_viz_internal.h"
+
 /* Fixed names of the subgroups and the geometry datasets. */
-#define GEOM_GROUP  "geometry"
+#define GEOM_GROUP "geometry"
 #define PDATA_GROUP "point_data"
 #define CDATA_GROUP "cell_data"
-#define NODES_NAME  "nodes"
-#define CONN_NAME   "connectivity"
+#define NODES_NAME "nodes"
+#define CONN_NAME "connectivity"
 
 /* Number of coordinates per node. The scheme is always three-dimensional. */
 #define NODE_COMPS 3
 
-static h5c_status_t agree(const h5c_viz_t *viz, h5c_status_t local)
-{
+static h5c_status_t agree(const h5c_viz_t* viz, h5c_status_t local) {
     return viz->ops ? viz->ops->agree(viz->context, local) : local;
 }
 
 /* Folds `status` into the writer's sticky error and returns it unchanged. */
-static h5c_status_t record(h5c_viz_t *viz, h5c_status_t status)
-{
+static h5c_status_t record(h5c_viz_t* viz, h5c_status_t status) {
     if (viz != NULL && viz->sticky == H5C_OK && status != H5C_OK) {
         viz->sticky = status;
     }
@@ -30,21 +27,17 @@ static h5c_status_t record(h5c_viz_t *viz, h5c_status_t status)
 }
 
 /* Validates the handle. Nothing can be agreed without a communicator. */
-static h5c_status_t viz_check(const h5c_viz_t *viz)
-{
+static h5c_status_t viz_check(const h5c_viz_t* viz) {
     if (viz == NULL || viz->fid < 0) {
-        return h5c__fail(H5C_ERR_INVALID_ARG,
-                         "visualization handle is NULL or closed");
+        return h5c__fail(H5C_ERR_INVALID_ARG, "visualization handle is NULL or closed");
     }
     return H5C_OK;
 }
 
 /* Validates that a mesh is current. */
-static h5c_status_t mesh_check(const h5c_viz_t *viz)
-{
+static h5c_status_t mesh_check(const h5c_viz_t* viz) {
     if (!viz->have_mesh) {
-        return h5c__fail(H5C_ERR_STATE,
-                         "no current mesh; call h5c_viz_begin_mesh() first");
+        return h5c__fail(H5C_ERR_STATE, "no current mesh; call h5c_viz_begin_mesh() first");
     }
     return H5C_OK;
 }
@@ -53,10 +46,9 @@ static h5c_status_t mesh_check(const h5c_viz_t *viz)
  * Builds "/<mesh>[/<sub>[/<leaf>]]" for the attribute calls, which address
  * objects by path. Returns NULL on allocation failure; the caller frees.
  */
-static char *mesh_path(const h5c_viz_t *viz, const char *sub, const char *leaf)
-{
+static char* mesh_path(const h5c_viz_t* viz, const char* sub, const char* leaf) {
     size_t n;
-    char  *p;
+    char* p;
 
     n = 1 + strlen(viz->name) + 1;
     if (sub != NULL) {
@@ -65,10 +57,9 @@ static char *mesh_path(const h5c_viz_t *viz, const char *sub, const char *leaf)
     if (leaf != NULL) {
         n += strlen(leaf) + 1;
     }
-    p = (char *)malloc(n);
+    p = (char*)malloc(n);
     if (p == NULL) {
-        h5c__fail(H5C_ERR_NOMEM, "cannot build the object path for '%s'",
-                  viz->name);
+        h5c__fail(H5C_ERR_NOMEM, "cannot build the object path for '%s'", viz->name);
         return NULL;
     }
     if (leaf != NULL) {
@@ -81,16 +72,13 @@ static char *mesh_path(const h5c_viz_t *viz, const char *sub, const char *leaf)
     return p;
 }
 
-static hid_t make_dxpl(const h5c_viz_t *viz)
-{
+static hid_t make_dxpl(const h5c_viz_t* viz) {
     return viz->ops ? viz->ops->make_dxpl() : H5P_DEFAULT;
 }
 
-static h5c_status_t select_rows(const h5c_viz_t *viz, hid_t fsid, int drank, size_t offset,
-                                size_t rows, size_t ncols, hid_t *msid_out)
-{
+static h5c_status_t select_rows(const h5c_viz_t* viz, hid_t fsid, int drank, size_t offset, size_t rows, size_t ncols, hid_t* msid_out) {
     hsize_t start[2], count[2], mdims[2];
-    hid_t   msid;
+    hid_t msid;
 
     *msid_out = H5I_INVALID_HID;
 
@@ -111,8 +99,7 @@ static h5c_status_t select_rows(const h5c_viz_t *viz, hid_t fsid, int drank, siz
         start[1] = 0;
         count[0] = (hsize_t)rows;
         count[1] = (hsize_t)ncols;
-        if (H5Sselect_hyperslab(fsid, H5S_SELECT_SET, start, NULL,
-                                count, NULL) < 0) {
+        if (H5Sselect_hyperslab(fsid, H5S_SELECT_SET, start, NULL, count, NULL) < 0) {
             H5Sclose(msid);
             return h5c__fail_hdf5(-1, "H5Sselect_hyperslab failed");
         }
@@ -125,23 +112,17 @@ static h5c_status_t select_rows(const h5c_viz_t *viz, hid_t fsid, int drank, siz
  * Creates <gid>/<name> with the file shape (total[, ncols]). On success both
  * ids are open and owned by the caller.
  */
-static h5c_status_t create_dataset(hid_t gid, const char *name,
-                                   h5c_type_t type, size_t total,
-                                   int drank, size_t ncols,
-                                   hid_t *did_out, hid_t *fsid_out)
-{
+static h5c_status_t create_dataset(hid_t gid, const char* name, h5c_type_t type, size_t total, int drank, size_t ncols, hid_t* did_out, hid_t* fsid_out) {
     hsize_t fdims[2];
-    hid_t   ftype, fsid, did;
-    htri_t  present;
+    hid_t ftype, fsid, did;
+    htri_t present;
 
-    *did_out  = H5I_INVALID_HID;
+    *did_out = H5I_INVALID_HID;
     *fsid_out = H5I_INVALID_HID;
 
     ftype = h5c__file_type(type);
     if (ftype == H5I_INVALID_HID) {
-        return h5c__fail(H5C_ERR_INVALID_ARG,
-                         "type %d has no numeric mapping for '%s'",
-                         (int)type, name);
+        return h5c__fail(H5C_ERR_INVALID_ARG, "type %d has no numeric mapping for '%s'", (int)type, name);
     }
     present = H5Lexists(gid, name, H5P_DEFAULT);
     if (present < 0) {
@@ -155,17 +136,14 @@ static h5c_status_t create_dataset(hid_t gid, const char *name,
     fdims[1] = (hsize_t)ncols;
     fsid = H5Screate_simple(drank, fdims, NULL);
     if (fsid < 0) {
-        return h5c__fail_hdf5((long)fsid,
-                              "cannot build the file dataspace for '%s'", name);
+        return h5c__fail_hdf5((long)fsid, "cannot build the file dataspace for '%s'", name);
     }
-    did = H5Dcreate2(gid, name, ftype, fsid,
-                     H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    did = H5Dcreate2(gid, name, ftype, fsid, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
     if (did < 0) {
         H5Sclose(fsid);
-        return h5c__fail_hdf5((long)did, "cannot create the dataset '%s'",
-                              name);
+        return h5c__fail_hdf5((long)did, "cannot create the dataset '%s'", name);
     }
-    *did_out  = did;
+    *did_out = did;
     *fsid_out = fsid;
     return H5C_OK;
 }
@@ -174,17 +152,12 @@ static h5c_status_t create_dataset(hid_t gid, const char *name,
  * Writes this rank's rows of an already-contiguous buffer in one collective
  * transfer. `buf` may be NULL when `rows == 0`.
  */
-static h5c_status_t write_block(const h5c_viz_t *viz, hid_t gid,
-                                const char *name, const void *buf,
-                                h5c_type_t type, size_t rows, size_t offset,
-                                size_t total, int drank, size_t ncols)
-{
+static h5c_status_t write_block(const h5c_viz_t* viz, hid_t gid, const char* name, const void* buf, h5c_type_t type, size_t rows, size_t offset, size_t total, int drank, size_t ncols) {
     h5c_status_t st;
-    hid_t        did, fsid, msid = H5I_INVALID_HID, xfer;
-    char         dummy = 0;
+    hid_t did, fsid, msid = H5I_INVALID_HID, xfer;
+    char dummy = 0;
 
-    if ((st = create_dataset(gid, name, type, total, drank, ncols,
-                             &did, &fsid)) != H5C_OK) {
+    if ((st = create_dataset(gid, name, type, total, drank, ncols, &did, &fsid)) != H5C_OK) {
         return st;
     }
     xfer = make_dxpl(viz);
@@ -194,13 +167,16 @@ static h5c_status_t write_block(const h5c_viz_t *viz, hid_t gid,
         st = select_rows(viz, fsid, drank, offset, rows, ncols, &msid);
     }
     if ((st = agree(viz, st)) == H5C_OK) {
-        if (H5Dwrite(did, h5c__mem_type(type), msid, fsid, xfer,
-                     (buf != NULL) ? buf : (const void *)&dummy) < 0) {
+        if (H5Dwrite(did, h5c__mem_type(type), msid, fsid, xfer, (buf != NULL) ? buf : (const void*)&dummy) < 0) {
             st = h5c__fail_hdf5(-1, "H5Dwrite failed for '%s'", name);
         }
     }
-    if (msid >= 0) { H5Sclose(msid); }
-    if (xfer >= 0 && xfer != H5P_DEFAULT) { H5Pclose(xfer); }
+    if (msid >= 0) {
+        H5Sclose(msid);
+    }
+    if (xfer >= 0 && xfer != H5P_DEFAULT) {
+        H5Pclose(xfer);
+    }
     H5Dclose(did);
     H5Sclose(fsid);
     return st;
@@ -212,18 +188,17 @@ static h5c_status_t write_block(const h5c_viz_t *viz, hid_t gid,
  * transfer remains contiguous in the file. `stage` gathers rows
  * [row0, row0 + rows) of the caller's data into `dst`.
  */
-typedef void (*stage_fn)(char *dst, size_t row0, size_t rows, const void *ctx);
+typedef void (*stage_fn)(char* dst, size_t row0, size_t rows, const void* ctx);
 
 /* Component interleaving; ctx is a comps_ctx. Delegates to h5c__pack_tile. */
 typedef struct {
-    const void *const *comps;
-    size_t             ncomp;
-    size_t             esize;
+    const void* const* comps;
+    size_t ncomp;
+    size_t esize;
 } comps_ctx;
 
-static void stage_comps(char *dst, size_t row0, size_t rows, const void *ctx)
-{
-    const comps_ctx *c = (const comps_ctx *)ctx;
+static void stage_comps(char* dst, size_t row0, size_t rows, const void* ctx) {
+    const comps_ctx* c = (const comps_ctx*)ctx;
 
     h5c__pack_tile(dst, c->comps, c->ncomp, row0, rows, c->esize);
 }
@@ -234,61 +209,70 @@ static void stage_comps(char *dst, size_t row0, size_t rows, const void *ctx)
  * buffer, which stays const throughout.
  */
 typedef struct {
-    const void *conn;
-    size_t      npe;
-    size_t      offset;
-    h5c_type_t  type;
+    const void* conn;
+    size_t npe;
+    size_t offset;
+    h5c_type_t type;
 } conn_ctx;
 
 /* Reads element `i` of a connectivity buffer of `type` as int64. */
-static int64_t conn_get(const void *conn, size_t i, h5c_type_t type)
-{
+static int64_t conn_get(const void* conn, size_t i, h5c_type_t type) {
     switch (type) {
-    case H5C_I8:  return (int64_t)((const int8_t  *)conn)[i];
-    case H5C_I16: return (int64_t)((const int16_t *)conn)[i];
-    case H5C_I32: return (int64_t)((const int32_t *)conn)[i];
-    default:      return          ((const int64_t *)conn)[i];
+        case H5C_I8:
+            return (int64_t)((const int8_t*)conn)[i];
+        case H5C_I16:
+            return (int64_t)((const int16_t*)conn)[i];
+        case H5C_I32:
+            return (int64_t)((const int32_t*)conn)[i];
+        default:
+            return ((const int64_t*)conn)[i];
     }
 }
 
 /* Stores `v` as element `i` of a connectivity buffer of `type`. */
-static void conn_put(void *dst, size_t i, h5c_type_t type, int64_t v)
-{
+static void conn_put(void* dst, size_t i, h5c_type_t type, int64_t v) {
     switch (type) {
-    case H5C_I8:  ((int8_t  *)dst)[i] = (int8_t)v;  break;
-    case H5C_I16: ((int16_t *)dst)[i] = (int16_t)v; break;
-    case H5C_I32: ((int32_t *)dst)[i] = (int32_t)v; break;
-    default:      ((int64_t *)dst)[i] = v;          break;
+        case H5C_I8:
+            ((int8_t*)dst)[i] = (int8_t)v;
+            break;
+        case H5C_I16:
+            ((int16_t*)dst)[i] = (int16_t)v;
+            break;
+        case H5C_I32:
+            ((int32_t*)dst)[i] = (int32_t)v;
+            break;
+        default:
+            ((int64_t*)dst)[i] = v;
+            break;
     }
 }
 
 /* Largest value the connectivity element type can hold. */
-static int64_t conn_max(h5c_type_t type)
-{
+static int64_t conn_max(h5c_type_t type) {
     switch (type) {
-    case H5C_I8:  return 127;
-    case H5C_I16: return 32767;
-    case H5C_I32: return 2147483647;
-    default:      return 9223372036854775807LL;
+        case H5C_I8:
+            return 127;
+        case H5C_I16:
+            return 32767;
+        case H5C_I32:
+            return 2147483647;
+        default:
+            return 9223372036854775807LL;
     }
 }
 
-static void stage_conn(char *dst, size_t row0, size_t rows, const void *ctx)
-{
-    const conn_ctx *c = (const conn_ctx *)ctx;
-    size_t          first = row0 * c->npe;
-    size_t          n     = rows * c->npe;
-    size_t          i;
+static void stage_conn(char* dst, size_t row0, size_t rows, const void* ctx) {
+    const conn_ctx* c = (const conn_ctx*)ctx;
+    size_t first = row0 * c->npe;
+    size_t n = rows * c->npe;
+    size_t i;
 
     for (i = 0; i < n; i++) {
-        conn_put(dst, i, c->type,
-                 conn_get(c->conn, first + i, c->type) + (int64_t)c->offset);
+        conn_put(dst, i, c->type, conn_get(c->conn, first + i, c->type) + (int64_t)c->offset);
     }
 }
 
-static h5c_status_t agree_tiles(const h5c_viz_t *viz, size_t n, size_t rows,
-                                long long *ntiles)
-{
+static h5c_status_t agree_tiles(const h5c_viz_t* viz, size_t n, size_t rows, long long* ntiles) {
     long long mine = (rows > 0) ? (long long)((n + rows - 1) / rows) : 0;
     *ntiles = (mine < 1) ? 1 : mine;
     return viz->ops ? viz->ops->agree_tiles(viz->context, ntiles) : H5C_OK;
@@ -302,33 +286,25 @@ static h5c_status_t agree_tiles(const h5c_viz_t *viz, size_t n, size_t rows,
  * The returned status is agreed across the communicator, so all ranks leave
  * with the same verdict.
  */
-static h5c_status_t write_staged(const h5c_viz_t *viz, hid_t gid,
-                                 const char *name,
-                                 h5c_type_t type, size_t rows_local,
-                                 size_t offset, size_t total, size_t ncols,
-                                 stage_fn stage, const void *ctx)
-{
+static h5c_status_t write_staged(const h5c_viz_t* viz, hid_t gid, const char* name, h5c_type_t type, size_t rows_local, size_t offset, size_t total, size_t ncols, stage_fn stage, const void* ctx) {
     h5c_status_t st = H5C_OK;
-    hid_t        did = H5I_INVALID_HID, fsid = H5I_INVALID_HID;
-    hid_t        xfer = H5I_INVALID_HID;
-    char        *buf = NULL;
-    size_t       esize, row_bytes, rows;
-    long long    ntiles = 1, t;
-    int          drank;
+    hid_t did = H5I_INVALID_HID, fsid = H5I_INVALID_HID;
+    hid_t xfer = H5I_INVALID_HID;
+    char* buf = NULL;
+    size_t esize, row_bytes, rows;
+    long long ntiles = 1, t;
+    int drank;
 
-    esize     = h5c_type_size(type);
-    drank     = (ncols > 1) ? 2 : 1;
+    esize = h5c_type_size(type);
+    drank = (ncols > 1) ? 2 : 1;
     row_bytes = (esize > 0) ? ncols * esize : 1;
-    rows      = h5c__tile_rows(rows_local, row_bytes);
+    rows = h5c__tile_rows(rows_local, row_bytes);
     if (esize == 0) {
-        st = h5c__fail(H5C_ERR_INVALID_ARG,
-                       "type %d cannot be staged for '%s'", (int)type, name);
+        st = h5c__fail(H5C_ERR_INVALID_ARG, "type %d cannot be staged for '%s'", (int)type, name);
     } else if (rows > 0) {
-        buf = (char *)malloc(rows * row_bytes);
+        buf = (char*)malloc(rows * row_bytes);
         if (buf == NULL) {
-            st = h5c__fail(H5C_ERR_NOMEM,
-                           "cannot allocate %lu bytes to stage '%s'",
-                           (unsigned long)(rows * row_bytes), name);
+            st = h5c__fail(H5C_ERR_NOMEM, "cannot allocate %lu bytes to stage '%s'", (unsigned long)(rows * row_bytes), name);
         }
     }
     if ((st = agree(viz, st)) != H5C_OK) {
@@ -348,9 +324,15 @@ static h5c_status_t write_staged(const h5c_viz_t *viz, hid_t gid,
         }
     }
     if ((st = agree(viz, st)) != H5C_OK) {
-        if (xfer >= 0 && xfer != H5P_DEFAULT) { H5Pclose(xfer); }
-        if (did  >= 0) { H5Dclose(did);  }
-        if (fsid >= 0) { H5Sclose(fsid); }
+        if (xfer >= 0 && xfer != H5P_DEFAULT) {
+            H5Pclose(xfer);
+        }
+        if (did >= 0) {
+            H5Dclose(did);
+        }
+        if (fsid >= 0) {
+            H5Sclose(fsid);
+        }
         free(buf);
         return st;
     }
@@ -358,17 +340,18 @@ static h5c_status_t write_staged(const h5c_viz_t *viz, hid_t gid,
     for (t = 0; t < ntiles; t++) {
         size_t row0 = (size_t)t * rows;
         size_t take = 0;
-        char   dummy = 0;
-        hid_t  msid;
+        char dummy = 0;
+        hid_t msid;
 
         if (rows > 0 && row0 < rows_local) {
             take = (rows_local - row0 < rows) ? rows_local - row0 : rows;
         }
-        h5c_status_t selected = select_rows(viz, fsid, drank, offset + row0,
-                                             take, ncols, &msid);
+        h5c_status_t selected = select_rows(viz, fsid, drank, offset + row0, take, ncols, &msid);
         selected = agree(viz, selected);
         if (selected != H5C_OK) {
-            if (msid >= 0) { H5Sclose(msid); }
+            if (msid >= 0) {
+                H5Sclose(msid);
+            }
             if (st == H5C_OK) {
                 st = selected;
             }
@@ -377,40 +360,44 @@ static h5c_status_t write_staged(const h5c_viz_t *viz, hid_t gid,
         if (take > 0) {
             stage(buf, row0, take, ctx);
         }
-        if (H5Dwrite(did, h5c__mem_type(type), msid, fsid, xfer,
-                     (buf != NULL) ? (const void *)buf
-                                   : (const void *)&dummy) < 0 &&
+        if (H5Dwrite(did, h5c__mem_type(type), msid, fsid, xfer, (buf != NULL) ? (const void*)buf : (const void*)&dummy) < 0 &&
             st == H5C_OK) {
-            st = h5c__fail_hdf5(-1, "H5Dwrite failed for tile %lld of '%s'",
-                                t, name);
+            st = h5c__fail_hdf5(-1, "H5Dwrite failed for tile %lld of '%s'", t, name);
         }
         H5Sclose(msid);
     }
 
-    if (xfer >= 0 && xfer != H5P_DEFAULT) { H5Pclose(xfer); }
-    if (did  >= 0) { H5Dclose(did);  }
-    if (fsid >= 0) { H5Sclose(fsid); }
+    if (xfer >= 0 && xfer != H5P_DEFAULT) {
+        H5Pclose(xfer);
+    }
+    if (did >= 0) {
+        H5Dclose(did);
+    }
+    if (fsid >= 0) {
+        H5Sclose(fsid);
+    }
     free(buf);
     return agree(viz, st);
 }
 
-const char *h5c_viz_attribute_type(size_t ncomp)
-{
+const char* h5c_viz_attribute_type(size_t ncomp) {
     switch (ncomp) {
-    case 1: return "Scalar";
-    case 3: return "Vector";
-    case 6: return "Tensor6";
-    case 9: return "Tensor";
-    default: return NULL;
+        case 1:
+            return "Scalar";
+        case 3:
+            return "Vector";
+        case 6:
+            return "Tensor6";
+        case 9:
+            return "Tensor";
+        default:
+            return NULL;
     }
 }
 
-h5c_status_t h5c__viz_open(const char *path, double time, hid_t fapl,
-                           const h5c_viz_ops *ops, void *context,
-                           h5c_viz_t **out)
-{
+h5c_status_t h5c__viz_open(const char* path, double time, hid_t fapl, const h5c_viz_ops* ops, void* context, h5c_viz_t** out) {
     h5c_status_t st = H5C_OK;
-    h5c_viz_t *viz = NULL;
+    h5c_viz_t* viz = NULL;
     int32_t scheme = (int32_t)H5C_SCHEME_VERSION;
 
     if (out == NULL) {
@@ -425,21 +412,23 @@ h5c_status_t h5c__viz_open(const char *path, double time, hid_t fapl,
         st = h5c__ensure_init();
     }
     if (st == H5C_OK) {
-        viz = (h5c_viz_t *)calloc(1, sizeof *viz);
+        viz = (h5c_viz_t*)calloc(1, sizeof *viz);
         if (viz == NULL) {
             st = h5c__fail(H5C_ERR_NOMEM, "h5c_viz_open: allocation failed");
         }
     }
-    if (ops) { st = ops->agree(context, st); }
+    if (ops) {
+        st = ops->agree(context, st);
+    }
     if (st != H5C_OK) {
         free(viz);
         free(context);
         return st;
     }
-    viz->ops       = ops;
-    viz->context   = context;
-    viz->gid_mesh  = H5I_INVALID_HID;
-    viz->gid_geom  = H5I_INVALID_HID;
+    viz->ops = ops;
+    viz->context = context;
+    viz->gid_mesh = H5I_INVALID_HID;
+    viz->gid_geom = H5I_INVALID_HID;
     viz->gid_pdata = H5I_INVALID_HID;
     viz->gid_cdata = H5I_INVALID_HID;
     viz->fid = H5Fcreate(path, H5F_ACC_TRUNC, H5P_DEFAULT, fapl);
@@ -449,8 +438,7 @@ h5c_status_t h5c__viz_open(const char *path, double time, hid_t fapl,
         st = h5c_file_from_hid(viz->fid, &viz->wrap);
     }
     if ((st = agree(viz, st)) == H5C_OK) {
-        st = h5c_write_attr_scalar(viz->wrap, "/", "scheme_version",
-                                   &scheme, H5C_I32);
+        st = h5c_write_attr_scalar(viz->wrap, "/", "scheme_version", &scheme, H5C_I32);
         if (st == H5C_OK) {
             st = h5c_write_attr_scalar(viz->wrap, "/", "time", &time, H5C_F64);
         }
@@ -464,29 +452,34 @@ h5c_status_t h5c__viz_open(const char *path, double time, hid_t fapl,
     return H5C_OK;
 }
 
-h5c_status_t h5c_viz_open(const char *path, double time, h5c_viz_t **out)
-{
+h5c_status_t h5c_viz_open(const char* path, double time, h5c_viz_t** out) {
     return h5c__viz_open(path, time, H5P_DEFAULT, NULL, NULL, out);
 }
 
 /* Releases the current mesh's group ids. Leaves no dangling id behind. */
-static void close_mesh(h5c_viz_t *viz)
-{
-    if (viz->gid_cdata >= 0) { H5Gclose(viz->gid_cdata); }
-    if (viz->gid_pdata >= 0) { H5Gclose(viz->gid_pdata); }
-    if (viz->gid_geom  >= 0) { H5Gclose(viz->gid_geom);  }
-    if (viz->gid_mesh  >= 0) { H5Gclose(viz->gid_mesh);  }
+static void close_mesh(h5c_viz_t* viz) {
+    if (viz->gid_cdata >= 0) {
+        H5Gclose(viz->gid_cdata);
+    }
+    if (viz->gid_pdata >= 0) {
+        H5Gclose(viz->gid_pdata);
+    }
+    if (viz->gid_geom >= 0) {
+        H5Gclose(viz->gid_geom);
+    }
+    if (viz->gid_mesh >= 0) {
+        H5Gclose(viz->gid_mesh);
+    }
     viz->gid_cdata = H5I_INVALID_HID;
     viz->gid_pdata = H5I_INVALID_HID;
-    viz->gid_geom  = H5I_INVALID_HID;
-    viz->gid_mesh  = H5I_INVALID_HID;
+    viz->gid_geom = H5I_INVALID_HID;
+    viz->gid_mesh = H5I_INVALID_HID;
     free(viz->name);
-    viz->name      = NULL;
+    viz->name = NULL;
     viz->have_mesh = 0;
 }
 
-h5c_status_t h5c_viz_close(h5c_viz_t *viz)
-{
+h5c_status_t h5c_viz_close(h5c_viz_t* viz) {
     h5c_status_t st = H5C_OK;
 
     if (viz == NULL) {
@@ -502,26 +495,23 @@ h5c_status_t h5c_viz_close(h5c_viz_t *viz)
         }
     }
     if (viz->wrap != NULL) {
-        h5c_close(viz->wrap);  /* borrowed wrapper; frees only the wrapper */
+        h5c_close(viz->wrap); /* borrowed wrapper; frees only the wrapper */
     }
     free(viz->context);
     free(viz);
     return st;
 }
 
-h5c_status_t h5c_viz_status(const h5c_viz_t *viz)
-{
+h5c_status_t h5c_viz_status(const h5c_viz_t* viz) {
     return (viz == NULL) ? H5C_ERR_INVALID_ARG : viz->sticky;
 }
 
 /* Opens <loc>/<name>, creating it when absent. */
-static h5c_status_t open_or_create_group(hid_t loc, const char *name,
-                                         hid_t *out)
-{
+static h5c_status_t open_or_create_group(hid_t loc, const char* name, hid_t* out) {
     htri_t present;
-    hid_t  gid;
+    hid_t gid;
 
-    *out    = H5I_INVALID_HID;
+    *out = H5I_INVALID_HID;
     present = H5Lexists(loc, name, H5P_DEFAULT);
     if (present < 0) {
         return h5c__fail_hdf5((long)present, "H5Lexists failed for '%s'", name);
@@ -529,45 +519,41 @@ static h5c_status_t open_or_create_group(hid_t loc, const char *name,
     if (present > 0) {
         gid = H5Gopen2(loc, name, H5P_DEFAULT);
         if (gid < 0) {
-            return h5c__fail_hdf5((long)gid, "cannot open the group '%s'",
-                                  name);
+            return h5c__fail_hdf5((long)gid, "cannot open the group '%s'", name);
         }
     } else {
         gid = H5Gcreate2(loc, name, h5c__lcpl(), H5P_DEFAULT, H5P_DEFAULT);
         if (gid < 0) {
-            return h5c__fail_hdf5((long)gid, "cannot create the group '%s'",
-                                  name);
+            return h5c__fail_hdf5((long)gid, "cannot create the group '%s'", name);
         }
     }
     *out = gid;
     return H5C_OK;
 }
 
-static h5c_status_t gather_counts(h5c_viz_t *viz, size_t np, size_t nc)
-{
+static h5c_status_t gather_counts(h5c_viz_t* viz, size_t np, size_t nc) {
     if (viz->ops) {
         return viz->ops->gather_counts(viz->context, viz, np, nc);
     }
     viz->point_offset = 0;
-    viz->cell_offset  = 0;
+    viz->cell_offset = 0;
     viz->total_points = np;
-    viz->total_cells  = nc;
+    viz->total_cells = nc;
     return H5C_OK;
 }
 
-h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
-{
+h5c_status_t h5c_viz_begin_mesh(h5c_viz_t* viz, const h5c_viz_mesh_t* mesh) {
     h5c_status_t st;
-    const char  *name, *topology;
-    char        *path = NULL;
-    int          npe, created;
-    int32_t      npe_attr;
+    const char *name, *topology;
+    char* path = NULL;
+    int npe, created;
+    int32_t npe_attr;
 
     if ((st = h5c__ensure_init()) != H5C_OK) {
         return record(viz, st);
     }
     if ((st = viz_check(viz)) != H5C_OK) {
-        return st;  /* no communicator, so nothing can be agreed */
+        return st; /* no communicator, so nothing can be agreed */
     }
 
     /*
@@ -581,9 +567,9 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
 
     /* local validation, agreed before any HDF5 call */
     st = H5C_OK;
-    name     = H5C_VIZ_DEFAULT_UGRID_NAME;
+    name = H5C_VIZ_DEFAULT_UGRID_NAME;
     topology = H5C_VIZ_DEFAULT_TOPOLOGY;
-    npe      = H5C_VIZ_DEFAULT_NODES_PER_ELEM;
+    npe = H5C_VIZ_DEFAULT_NODES_PER_ELEM;
     if (mesh == NULL) {
         st = h5c__fail(H5C_ERR_INVALID_ARG, "h5c_viz_begin_mesh: mesh is NULL");
     } else if (mesh->kind == H5C_VIZ_UNSTRUCTURED) {
@@ -596,9 +582,7 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
         if (mesh->nodes_per_element > 0) {
             npe = mesh->nodes_per_element;
         } else if (mesh->nodes_per_element < 0) {
-            st = h5c__fail(H5C_ERR_INVALID_ARG,
-                           "nodes_per_element %d is negative",
-                           mesh->nodes_per_element);
+            st = h5c__fail(H5C_ERR_INVALID_ARG, "nodes_per_element %d is negative", mesh->nodes_per_element);
         }
     } else if (mesh->kind == H5C_VIZ_POLYDATA) {
         /*
@@ -606,9 +590,9 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
          * whatever the caller asked for, and the same values must appear here
          * or h5xdmf would emit a topology the file cannot back.
          */
-        name     = H5C_VIZ_DEFAULT_POLYDATA_NAME;
+        name = H5C_VIZ_DEFAULT_POLYDATA_NAME;
         topology = "Polyvertex";
-        npe      = 1;
+        npe = 1;
         if (mesh->name != NULL && mesh->name[0] != '\0') {
             name = mesh->name;
         }
@@ -619,18 +603,17 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
                            name, (unsigned long)mesh->num_cells);
         }
     } else {
-        st = h5c__fail(H5C_ERR_INVALID_ARG, "unknown mesh kind %d",
-                       (int)(mesh == NULL ? 0 : mesh->kind));
+        st = h5c__fail(H5C_ERR_INVALID_ARG, "unknown mesh kind %d", (int)(mesh == NULL ? 0 : mesh->kind));
     }
     if ((st = agree(viz, st)) != H5C_OK) {
         return record(viz, st);
     }
 
-    viz->kind       = mesh->kind;
-    viz->npe        = npe;
+    viz->kind = mesh->kind;
+    viz->npe = npe;
     viz->num_points = mesh->num_points;
-    viz->num_cells  = mesh->num_cells;
-    viz->name       = (char *)malloc(strlen(name) + 1);
+    viz->num_cells = mesh->num_cells;
+    viz->name = (char*)malloc(strlen(name) + 1);
     if (viz->name == NULL) {
         st = h5c__fail(H5C_ERR_NOMEM, "cannot copy the mesh name '%s'", name);
     } else {
@@ -651,8 +634,7 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
         htri_t present = H5Lexists(viz->fid, viz->name, H5P_DEFAULT);
 
         if (present < 0) {
-            st = h5c__fail_hdf5((long)present, "H5Lexists failed for '%s'",
-                                viz->name);
+            st = h5c__fail_hdf5((long)present, "H5Lexists failed for '%s'", viz->name);
         }
         created = (present == 0);
     }
@@ -682,9 +664,7 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
             npe_attr = (int32_t)npe;
             st = h5c_write_attr_str(viz->wrap, path, "topology_type", topology);
             if (st == H5C_OK) {
-                st = h5c_write_attr_scalar(viz->wrap, path,
-                                           "nodes_per_element", &npe_attr,
-                                           H5C_I32);
+                st = h5c_write_attr_scalar(viz->wrap, path, "nodes_per_element", &npe_attr, H5C_I32);
             }
             free(path);
         }
@@ -698,9 +678,7 @@ h5c_status_t h5c_viz_begin_mesh(h5c_viz_t *viz, const h5c_viz_mesh_t *mesh)
     return H5C_OK;
 }
 
-h5c_status_t h5c_viz_offsets(const h5c_viz_t *viz,
-                             size_t *point_offset, size_t *cell_offset)
-{
+h5c_status_t h5c_viz_offsets(const h5c_viz_t* viz, size_t* point_offset, size_t* cell_offset) {
     h5c_status_t st;
 
     if ((st = viz_check(viz)) != H5C_OK) {
@@ -719,8 +697,7 @@ h5c_status_t h5c_viz_offsets(const h5c_viz_t *viz,
 }
 
 /* Shared entry checks for every write call below. */
-static h5c_status_t begin_write(h5c_viz_t *viz)
-{
+static h5c_status_t begin_write(h5c_viz_t* viz) {
     h5c_status_t st;
 
     if ((st = h5c__ensure_init()) != H5C_OK) {
@@ -733,19 +710,14 @@ static h5c_status_t begin_write(h5c_viz_t *viz)
 }
 
 /* F32 or F64: coordinates are real by definition. */
-static h5c_status_t check_coord_type(h5c_type_t type)
-{
+static h5c_status_t check_coord_type(h5c_type_t type) {
     if (type != H5C_F32 && type != H5C_F64) {
-        return h5c__fail(H5C_ERR_INVALID_ARG,
-                         "nodes must be H5C_F32 or H5C_F64, not type %d",
-                         (int)type);
+        return h5c__fail(H5C_ERR_INVALID_ARG, "nodes must be H5C_F32 or H5C_F64, not type %d", (int)type);
     }
     return H5C_OK;
 }
 
-h5c_status_t h5c_viz_write_nodes(h5c_viz_t *viz, const void *nodes,
-                                 h5c_type_t type)
-{
+h5c_status_t h5c_viz_write_nodes(h5c_viz_t* viz, const void* nodes, h5c_type_t type) {
     h5c_status_t st;
 
     if ((st = begin_write(viz)) != H5C_OK) {
@@ -753,26 +725,20 @@ h5c_status_t h5c_viz_write_nodes(h5c_viz_t *viz, const void *nodes,
     }
     if ((st = check_coord_type(type)) == H5C_OK &&
         nodes == NULL && viz->num_points > 0) {
-        st = h5c__fail(H5C_ERR_INVALID_ARG,
-                       "nodes is NULL but this rank owns %lu points",
-                       (unsigned long)viz->num_points);
+        st = h5c__fail(H5C_ERR_INVALID_ARG, "nodes is NULL but this rank owns %lu points", (unsigned long)viz->num_points);
     }
     if ((st = agree(viz, st)) != H5C_OK) {
         return record(viz, st);
     }
 
-    st = write_block(viz, viz->gid_geom, NODES_NAME, nodes, type, viz->num_points,
-                     viz->point_offset, viz->total_points, 2, NODE_COMPS);
+    st = write_block(viz, viz->gid_geom, NODES_NAME, nodes, type, viz->num_points, viz->point_offset, viz->total_points, 2, NODE_COMPS);
     return record(viz, agree(viz, st));
 }
 
-h5c_status_t h5c_viz_write_nodes_comps(h5c_viz_t *viz,
-                                       const void *const *xyz,
-                                       h5c_type_t type)
-{
+h5c_status_t h5c_viz_write_nodes_comps(h5c_viz_t* viz, const void* const* xyz, h5c_type_t type) {
     h5c_status_t st;
-    comps_ctx    ctx;
-    size_t       c;
+    comps_ctx ctx;
+    size_t c;
 
     if ((st = begin_write(viz)) != H5C_OK) {
         return record(viz, st);
@@ -784,8 +750,7 @@ h5c_status_t h5c_viz_write_nodes_comps(h5c_viz_t *viz,
     if (st == H5C_OK && viz->num_points > 0) {
         for (c = 0; c < NODE_COMPS; c++) {
             if (xyz[c] == NULL) {
-                st = h5c__fail(H5C_ERR_INVALID_ARG, "xyz[%lu] is NULL",
-                               (unsigned long)c);
+                st = h5c__fail(H5C_ERR_INVALID_ARG, "xyz[%lu] is NULL", (unsigned long)c);
                 break;
             }
         }
@@ -797,19 +762,15 @@ h5c_status_t h5c_viz_write_nodes_comps(h5c_viz_t *viz,
     ctx.comps = xyz;
     ctx.ncomp = NODE_COMPS;
     ctx.esize = h5c_type_size(type);
-    st = write_staged(viz, viz->gid_geom, NODES_NAME, type,
-                      viz->num_points, viz->point_offset, viz->total_points,
-                      NODE_COMPS, stage_comps, &ctx);
+    st = write_staged(viz, viz->gid_geom, NODES_NAME, type, viz->num_points, viz->point_offset, viz->total_points, NODE_COMPS, stage_comps, &ctx);
     return record(viz, st);
 }
 
-h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
-                                        h5c_type_t type)
-{
+h5c_status_t h5c_viz_write_connectivity(h5c_viz_t* viz, const void* conn, h5c_type_t type) {
     h5c_status_t st;
-    conn_ctx     ctx;
-    size_t       n, i;
-    int64_t      limit;
+    conn_ctx ctx;
+    size_t n, i;
+    int64_t limit;
 
     if ((st = begin_write(viz)) != H5C_OK) {
         return record(viz, st);
@@ -818,17 +779,11 @@ h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
     st = H5C_OK;
     if (type != H5C_I8 && type != H5C_I16 &&
         type != H5C_I32 && type != H5C_I64) {
-        st = h5c__fail(H5C_ERR_INVALID_ARG,
-                       "connectivity must be an integer type, not type %d",
-                       (int)type);
+        st = h5c__fail(H5C_ERR_INVALID_ARG, "connectivity must be an integer type, not type %d", (int)type);
     } else if (viz->kind != H5C_VIZ_UNSTRUCTURED) {
-        st = h5c__fail(H5C_ERR_STATE,
-                       "mesh '%s' is a point cloud and has no connectivity",
-                       viz->name);
+        st = h5c__fail(H5C_ERR_STATE, "mesh '%s' is a point cloud and has no connectivity", viz->name);
     } else if (conn == NULL && viz->num_cells > 0) {
-        st = h5c__fail(H5C_ERR_INVALID_ARG,
-                       "conn is NULL but this rank owns %lu cells",
-                       (unsigned long)viz->num_cells);
+        st = h5c__fail(H5C_ERR_INVALID_ARG, "conn is NULL but this rank owns %lu cells", (unsigned long)viz->num_cells);
     }
 
     /*
@@ -842,7 +797,7 @@ h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
      * itself can go wrong (h5fortran wraps around instead).
      */
     if (st == H5C_OK && viz->num_cells > 0) {
-        n     = viz->num_cells * (size_t)viz->npe;
+        n = viz->num_cells * (size_t)viz->npe;
         limit = conn_max(type);
         for (i = 0; i < n; i++) {
             int64_t v = conn_get(conn, i, type);
@@ -852,8 +807,7 @@ h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
                                "connectivity[%lu] is %lld, outside "
                                "[0, %lu): rank-local 0-origin node indices "
                                "are required",
-                               (unsigned long)i, (long long)v,
-                               (unsigned long)viz->num_points);
+                               (unsigned long)i, (long long)v, (unsigned long)viz->num_points);
                 break;
             }
             if (v > limit - (int64_t)viz->point_offset) {
@@ -861,8 +815,7 @@ h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
                                "global node id %lld does not fit the "
                                "connectivity element type (max %lld); "
                                "use a wider integer type",
-                               (long long)(v + (int64_t)viz->point_offset),
-                               (long long)limit);
+                               (long long)(v + (int64_t)viz->point_offset), (long long)limit);
                 break;
             }
         }
@@ -872,26 +825,22 @@ h5c_status_t h5c_viz_write_connectivity(h5c_viz_t *viz, const void *conn,
         return record(viz, st);
     }
 
-    ctx.conn   = conn;
-    ctx.npe    = (size_t)viz->npe;
+    ctx.conn = conn;
+    ctx.npe = (size_t)viz->npe;
     ctx.offset = viz->point_offset;
-    ctx.type   = type;
-    st = write_staged(viz, viz->gid_geom, CONN_NAME, type,
-                      viz->num_cells, viz->cell_offset, viz->total_cells,
-                      (size_t)viz->npe, stage_conn, &ctx);
+    ctx.type = type;
+    st = write_staged(viz, viz->gid_geom, CONN_NAME, type, viz->num_cells, viz->cell_offset, viz->total_cells, (size_t)viz->npe, stage_conn, &ctx);
     return record(viz, st);
 }
 
 /* Stamps attribute_type on a field, for the component counts XDMF names. */
-static h5c_status_t write_field_attr(h5c_viz_t *viz, const char *group,
-                                     const char *name, size_t ncomp)
-{
-    const char  *kind = h5c_viz_attribute_type(ncomp);
+static h5c_status_t write_field_attr(h5c_viz_t* viz, const char* group, const char* name, size_t ncomp) {
+    const char* kind = h5c_viz_attribute_type(ncomp);
     h5c_status_t st;
-    char        *path;
+    char* path;
 
     if (kind == NULL) {
-        return H5C_OK;  /* XDMF has no name for this count; see h5c_viz.h */
+        return H5C_OK; /* XDMF has no name for this count; see h5c_viz.h */
     }
     path = mesh_path(viz, group, name);
     if (path == NULL) {
@@ -911,55 +860,44 @@ static h5c_status_t write_field_attr(h5c_viz_t *viz, const char *group,
  * rejected on the writer communicator like any other bad argument, and a rank that guessed
  * the path from the pointer would take a different branch from its peers.
  */
-static h5c_status_t write_field(h5c_viz_t *viz, int cell_data,
-                                const char *name, const void *buf,
-                                const void *const *comps, int use_comps,
-                                h5c_type_t type, size_t ncomp)
-{
+static h5c_status_t write_field(h5c_viz_t* viz, int cell_data, const char* name, const void* buf, const void* const* comps, int use_comps, h5c_type_t type, size_t ncomp) {
     h5c_status_t st;
-    comps_ctx    ctx;
-    const char  *group;
-    hid_t        gid;
-    size_t       rows, offset, total, c;
+    comps_ctx ctx;
+    const char* group;
+    hid_t gid;
+    size_t rows, offset, total, c;
 
     if ((st = begin_write(viz)) != H5C_OK) {
         return record(viz, st);
     }
 
-    group  = cell_data ? CDATA_GROUP : PDATA_GROUP;
-    gid    = cell_data ? viz->gid_cdata : viz->gid_pdata;
-    rows   = cell_data ? viz->num_cells : viz->num_points;
+    group = cell_data ? CDATA_GROUP : PDATA_GROUP;
+    gid = cell_data ? viz->gid_cdata : viz->gid_pdata;
+    rows = cell_data ? viz->num_cells : viz->num_points;
     offset = cell_data ? viz->cell_offset : viz->point_offset;
-    total  = cell_data ? viz->total_cells : viz->total_points;
+    total = cell_data ? viz->total_cells : viz->total_points;
 
     st = H5C_OK;
     if (name == NULL || name[0] == '\0') {
         st = h5c__fail(H5C_ERR_INVALID_ARG, "empty field name");
     } else if (cell_data && viz->kind != H5C_VIZ_UNSTRUCTURED) {
-        st = h5c__fail(H5C_ERR_STATE,
-                       "mesh '%s' is a point cloud and has no cell data",
-                       viz->name);
+        st = h5c__fail(H5C_ERR_STATE, "mesh '%s' is a point cloud and has no cell data", viz->name);
     } else if (ncomp == 0) {
-        st = h5c__fail(H5C_ERR_INVALID_ARG,
-                       "field '%s' has ncomp 0", name);
-    } else if (h5c__file_type(type) == H5I_INVALID_HID ||
-               h5c_type_size(type) == 0) {
-        st = h5c__fail(H5C_ERR_INVALID_ARG,
-                       "type %d has no numeric mapping for field '%s'",
-                       (int)type, name);
+        st = h5c__fail(H5C_ERR_INVALID_ARG, "field '%s' has ncomp 0", name);
+    } else if (h5c__file_type(type) == H5I_INVALID_HID || h5c_type_size(type) == 0) {
+        st = h5c__fail(H5C_ERR_INVALID_ARG, "type %d has no numeric mapping for field '%s'", (int)type, name);
     } else if (use_comps && comps == NULL) {
         st = h5c__fail(H5C_ERR_INVALID_ARG, "field '%s': comps is NULL", name);
     } else if (rows > 0) {
         if (!use_comps && buf == NULL) {
             st = h5c__fail(H5C_ERR_INVALID_ARG,
                            "field '%s' buffer is NULL but this rank owns "
-                           "%lu rows", name, (unsigned long)rows);
+                           "%lu rows",
+                           name, (unsigned long)rows);
         }
         for (c = 0; use_comps && c < ncomp; c++) {
             if (comps[c] == NULL) {
-                st = h5c__fail(H5C_ERR_INVALID_ARG,
-                               "field '%s': comps[%lu] is NULL", name,
-                               (unsigned long)c);
+                st = h5c__fail(H5C_ERR_INVALID_ARG, "field '%s': comps[%lu] is NULL", name, (unsigned long)c);
                 break;
             }
         }
@@ -972,46 +910,30 @@ static h5c_status_t write_field(h5c_viz_t *viz, int cell_data,
         ctx.comps = comps;
         ctx.ncomp = ncomp;
         ctx.esize = h5c_type_size(type);
-        st = write_staged(viz, gid, name, type, rows, offset, total,
-                          ncomp, stage_comps, &ctx);
+        st = write_staged(viz, gid, name, type, rows, offset, total, ncomp, stage_comps, &ctx);
     } else {
-        st = agree(viz,
-                   write_block(viz, gid, name, buf, type, rows, offset, total,
-                               (ncomp > 1) ? 2 : 1, ncomp));
+        st = agree(viz, write_block(viz, gid, name, buf, type, rows, offset, total, (ncomp > 1) ? 2 : 1, ncomp));
     }
     if (st != H5C_OK) {
         return record(viz, st);
     }
 
     /* Every rank writes the attribute, as for the root metadata. */
-    return record(viz, agree(viz,
-                             write_field_attr(viz, group, name, ncomp)));
+    return record(viz, agree(viz, write_field_attr(viz, group, name, ncomp)));
 }
 
-h5c_status_t h5c_viz_write_point_data(h5c_viz_t *viz, const char *name,
-                                      const void *buf, h5c_type_t type,
-                                      size_t ncomp)
-{
+h5c_status_t h5c_viz_write_point_data(h5c_viz_t* viz, const char* name, const void* buf, h5c_type_t type, size_t ncomp) {
     return write_field(viz, 0, name, buf, NULL, 0, type, ncomp);
 }
 
-h5c_status_t h5c_viz_write_point_data_comps(h5c_viz_t *viz, const char *name,
-                                            const void *const *comps,
-                                            h5c_type_t type, size_t ncomp)
-{
+h5c_status_t h5c_viz_write_point_data_comps(h5c_viz_t* viz, const char* name, const void* const* comps, h5c_type_t type, size_t ncomp) {
     return write_field(viz, 0, name, NULL, comps, 1, type, ncomp);
 }
 
-h5c_status_t h5c_viz_write_cell_data(h5c_viz_t *viz, const char *name,
-                                     const void *buf, h5c_type_t type,
-                                     size_t ncomp)
-{
+h5c_status_t h5c_viz_write_cell_data(h5c_viz_t* viz, const char* name, const void* buf, h5c_type_t type, size_t ncomp) {
     return write_field(viz, 1, name, buf, NULL, 0, type, ncomp);
 }
 
-h5c_status_t h5c_viz_write_cell_data_comps(h5c_viz_t *viz, const char *name,
-                                           const void *const *comps,
-                                           h5c_type_t type, size_t ncomp)
-{
+h5c_status_t h5c_viz_write_cell_data_comps(h5c_viz_t* viz, const char* name, const void* const* comps, h5c_type_t type, size_t ncomp) {
     return write_field(viz, 1, name, NULL, comps, 1, type, ncomp);
 }
